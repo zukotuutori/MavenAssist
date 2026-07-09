@@ -4,6 +4,7 @@ import com.zukotuutori.mavenassist.maven.MavenCentralClient;
 import com.zukotuutori.mavenassist.maven.PomUtils;
 import com.zukotuutori.mavenassist.model.Dependency;
 import com.zukotuutori.mavenassist.services.DependencyManagerService;
+import com.zukotuutori.mavenassist.services.PomTemplateService;
 import com.zukotuutori.mavenassist.util.Notifier;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.fileChooser.FileChooser;
@@ -34,7 +35,9 @@ import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.io.File;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Shown when the chosen directory contains no pom.xml: lets the user create one,
@@ -142,10 +145,19 @@ public class CreatePomPanel extends JPanel {
         JPanel searchRow = new JPanel(new BorderLayout(JBUI.scale(4), 0));
         searchRow.setOpaque(false);
         searchRow.add(dependencySearchField, BorderLayout.CENTER);
+
+        JPanel searchButtons = new JPanel(new java.awt.GridLayout(1, 2, JBUI.scale(4), 0));
+        searchButtons.setOpaque(false);
         JButton selectAllButton = new JButton("Select All");
         selectAllButton.setToolTipText("Tick every dependency currently shown (search applied)");
         selectAllButton.addActionListener(e -> dependencyPicker.checkAllVisible());
-        searchRow.add(selectAllButton, BorderLayout.EAST);
+        searchButtons.add(selectAllButton);
+        JButton chooseTemplateButton = new JButton("Choose Template");
+        chooseTemplateButton.setToolTipText("Fill the whole form from a saved template");
+        chooseTemplateButton.addActionListener(e -> chooseTemplate());
+        searchButtons.add(chooseTemplateButton);
+        searchRow.add(searchButtons, BorderLayout.EAST);
+
         header.add(searchRow, BorderLayout.SOUTH);
 
         panel.add(header, BorderLayout.NORTH);
@@ -187,6 +199,53 @@ public class CreatePomPanel extends JPanel {
 
     private void showDependencyDetails(@NotNull Dependency dependency) {
         new PickableDetailsDialog(dependency).show();
+    }
+
+    private void chooseTemplate() {
+        ChooseTemplateDialog dialog = new ChooseTemplateDialog(project);
+        if (dialog.showAndGet()) {
+            PomTemplateService.Template template = dialog.getSelectedTemplate();
+            if (template != null) {
+                applyTemplate(template);
+            }
+        }
+    }
+
+    /**
+     * Fills the whole form from the template. Dependencies are matched by
+     * groupId:artifactId against the manager's catalog; entries that were removed
+     * from the catalog in the meantime cannot be ticked and are reported.
+     */
+    private void applyTemplate(@NotNull PomTemplateService.Template template) {
+        groupIdField.setText(template.groupId);
+        artifactIdField.setText(template.artifactId);
+        versionField.setText(template.version);
+        parentPomField.setText(template.parentPomPath == null ? "" : template.parentPomPath);
+        newestVersionsCheck.setSelected(template.useNewestVersions);
+
+        reloadDependencyList();
+        dependencyPicker.checkNone();
+
+        Set<String> available = new HashSet<>();
+        for (Dependency d : DependencyManagerService.getInstance().getAllDependencies()) {
+            available.add(d.getKey());
+        }
+        List<String> missing = new ArrayList<>();
+        for (String gav : template.dependencies) {
+            Dependency d = Dependency.fromGav(gav);
+            if (d == null) {
+                continue;
+            }
+            if (available.contains(d.getKey())) {
+                dependencyPicker.setChecked(d.getKey(), true);
+            } else {
+                missing.add(d.getKey());
+            }
+        }
+        if (!missing.isEmpty()) {
+            Notifier.warn(project, "Template \"" + template.name + "\" references dependencies that are no longer "
+                    + "in the manager and were skipped: " + String.join(", ", missing));
+        }
     }
 
     private void chooseParentPom() {
