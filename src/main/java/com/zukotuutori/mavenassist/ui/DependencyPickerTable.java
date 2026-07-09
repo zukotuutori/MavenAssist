@@ -95,8 +95,8 @@ class DependencyPickerTable extends JBTable {
         if (answer != Messages.YES) {
             return;
         }
-        DependencyManagerService.getInstance().removeDependency(d.getKey());
-        all.removeIf(dep -> dep.getKey().equals(d.getKey()));
+        DependencyManagerService.getInstance().removeDependency(d);
+        all.removeIf(dep -> dep.getName().equalsIgnoreCase(d.getName()) && dep.getKey().equals(d.getKey()));
         checkedKeys.remove(d.getKey());
         applyFilter();
     }
@@ -145,14 +145,15 @@ class DependencyPickerTable extends JBTable {
         model.fireTableDataChanged();
     }
 
+    /** The checked dependencies, one per groupId:artifactId (duplicate names collapse). */
     @NotNull List<Dependency> getCheckedDependencies() {
-        List<Dependency> result = new ArrayList<>();
+        java.util.Map<String, Dependency> byKey = new java.util.LinkedHashMap<>();
         for (Dependency d : all) {
             if (checkedKeys.contains(d.getKey())) {
-                result.add(d);
+                byKey.putIfAbsent(d.getKey(), d);
             }
         }
-        return result;
+        return new ArrayList<>(byKey.values());
     }
 
     /** Ticks every dependency currently visible (i.e. matching the active filter). */

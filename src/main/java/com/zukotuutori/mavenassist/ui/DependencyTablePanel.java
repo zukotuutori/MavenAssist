@@ -951,21 +951,47 @@ public class DependencyTablePanel extends JPanel {
                     }
                     resolved.add(dep.withVersion(version));
                 }
+                // Never write the same coordinates twice: re-check against the pom on disk.
+                List<Dependency> toAdd = new ArrayList<>();
+                List<String> duplicates = new ArrayList<>();
                 try {
-                    PomUtils.addDependencies(pom, resolved);
+                    Set<String> present = new HashSet<>();
+                    for (Dependency existing : PomUtils.readDependencies(pom)) {
+                        present.add(existing.getKey());
+                    }
+                    for (Dependency dep : resolved) {
+                        if (present.add(dep.getKey())) {
+                            toAdd.add(dep);
+                        } else {
+                            duplicates.add(dep.getKey());
+                        }
+                    }
+                } catch (IOException e) {
+                    Notifier.error(project, "Could not read " + pom.getName() + ": " + e.getMessage());
+                    return;
+                }
+                if (!duplicates.isEmpty()) {
+                    Notifier.error(project, "Already in the pom — not added again: "
+                            + String.join(", ", duplicates));
+                }
+                if (toAdd.isEmpty()) {
+                    return;
+                }
+                try {
+                    PomUtils.addDependencies(pom, toAdd);
                 } catch (IOException e) {
                     Notifier.error(project, "Failed to add dependencies: " + e.getMessage());
                     return;
                 }
                 int autoUpdateCount = 0;
                 AutoUpdateService service = AutoUpdateService.getInstance();
-                for (Dependency dep : resolved) {
+                for (Dependency dep : toAdd) {
                     if (autoUpdateKeys.contains(dep.getKey())) {
                         service.setAutoUpdate(pom.getAbsolutePath(), dep.getKey(), true);
                         autoUpdateCount++;
                     }
                 }
-                Notifier.info(project, "Added " + resolved.size() + " dependencies to pom.xml"
+                Notifier.info(project, "Added " + toAdd.size() + " dependencies to pom.xml"
                         + (autoUpdateCount > 0 ? " (" + autoUpdateCount + " with auto update)" : "")
                         + ". Building...");
                 ApplicationManager.getApplication().invokeLater(() -> {

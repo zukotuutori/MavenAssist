@@ -67,8 +67,12 @@ public class AddToManagerDialog extends DialogWrapper {
 
     @Override
     protected @Nullable ValidationInfo doValidate() {
-        if (nameField.getText().trim().isEmpty()) {
+        String name = nameField.getText().trim();
+        if (name.isEmpty()) {
             return new ValidationInfo("Please enter a name for the dependency.", nameField);
+        }
+        if (DependencyManagerService.getInstance().isNameUsed(name)) {
+            return new ValidationInfo("The name \"" + name + "\" is already used in the manager.", nameField);
         }
         if (PomUtils.parsePastedDependencies(textArea.getText()).isEmpty()) {
             return new ValidationInfo("No dependency found. Paste a <dependency> block or a groupId:artifactId line.",
@@ -95,7 +99,7 @@ public class AddToManagerDialog extends DialogWrapper {
             }
         }
         Notifier.info(project, "Added " + added + " dependencies to the manager"
-                + (skipped > 0 ? " (" + skipped + " already existed)" : "") + ".");
+                + (skipped > 0 ? " (" + skipped + " skipped — name already used)" : "") + ".");
         super.doOKAction();
     }
 }
