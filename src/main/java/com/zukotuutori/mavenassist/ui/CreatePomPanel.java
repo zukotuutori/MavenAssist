@@ -9,7 +9,6 @@ import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.fileChooser.FileChooser;
 import com.intellij.openapi.fileChooser.FileChooserDescriptor;
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory;
-import com.intellij.openapi.fileEditor.OpenFileDescriptor;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.Project;
@@ -103,16 +102,7 @@ public class CreatePomPanel extends JPanel {
         parentPanel.add(parentPomField, BorderLayout.CENTER);
         JButton browseParent = new JButton("Choose Path...");
         browseParent.addActionListener(e -> chooseParentPom());
-        JButton openParent = new JButton("Open");
-        openParent.addActionListener(e -> openParentPom());
-        JButton clearParent = new JButton("Clear");
-        clearParent.addActionListener(e -> parentPomField.setText(""));
-        JPanel parentButtons = new JPanel(new java.awt.GridLayout(1, 3, JBUI.scale(4), 0));
-        parentButtons.setOpaque(false);
-        parentButtons.add(browseParent);
-        parentButtons.add(openParent);
-        parentButtons.add(clearParent);
-        parentPanel.add(parentButtons, BorderLayout.EAST);
+        parentPanel.add(browseParent, BorderLayout.EAST);
 
         gbc.gridx = 1;
         gbc.weightx = 1;
@@ -197,20 +187,6 @@ public class CreatePomPanel extends JPanel {
         if (chosen != null) {
             parentPomField.setText(chosen.getPath());
         }
-    }
-
-    private void openParentPom() {
-        String path = parentPomField.getText().trim();
-        if (path.isEmpty()) {
-            Notifier.warn(project, "No parent pom path entered.");
-            return;
-        }
-        VirtualFile virtualFile = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(new File(path));
-        if (virtualFile == null) {
-            Notifier.warn(project, "File not found: " + path);
-            return;
-        }
-        new OpenFileDescriptor(project, virtualFile).navigate(true);
     }
 
     // ---------------------------------------------------------------- action
