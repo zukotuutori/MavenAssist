@@ -20,6 +20,7 @@ import javax.swing.JComponent;
 import javax.swing.JPanel;
 import javax.swing.ListSelectionModel;
 import java.awt.BorderLayout;
+import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.event.MouseAdapter;
@@ -67,7 +68,11 @@ class ChooseTemplateDialog extends DialogWrapper {
         JButton createButton = new JButton("Create Template...");
         createButton.addActionListener(e -> createTemplate());
         buttons.add(createButton);
-        JButton deleteButton = new JButton("Delete");
+        // Same red pill as the delete buttons in the dependency table.
+        JButton deleteButton = new JButton("Delete", TablePills.TRASH_WHITE);
+        deleteButton.putClientProperty("JButton.backgroundColor", TablePills.DELETE);
+        deleteButton.setForeground(Color.WHITE);
+        deleteButton.setToolTipText("Delete the selected template permanently");
         deleteButton.addActionListener(e -> deleteSelected());
         buttons.add(deleteButton);
         panel.add(buttons, BorderLayout.SOUTH);
