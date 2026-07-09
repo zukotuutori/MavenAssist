@@ -138,7 +138,16 @@ public class CreatePomPanel extends JPanel {
         JPanel header = new JPanel(new BorderLayout(0, JBUI.scale(2)));
         header.setOpaque(false);
         header.add(new JBLabel("Tick to select, search to filter:"), BorderLayout.NORTH);
-        header.add(dependencySearchField, BorderLayout.SOUTH);
+
+        JPanel searchRow = new JPanel(new BorderLayout(JBUI.scale(4), 0));
+        searchRow.setOpaque(false);
+        searchRow.add(dependencySearchField, BorderLayout.CENTER);
+        JButton selectAllButton = new JButton("Select All");
+        selectAllButton.setToolTipText("Tick every dependency currently shown (search applied)");
+        selectAllButton.addActionListener(e -> dependencyPicker.checkAllVisible());
+        searchRow.add(selectAllButton, BorderLayout.EAST);
+        header.add(searchRow, BorderLayout.SOUTH);
+
         panel.add(header, BorderLayout.NORTH);
         panel.add(new JBScrollPane(dependencyPicker), BorderLayout.CENTER);
         dependencyPicker.bindSearch(dependencySearchField);
