@@ -1,0 +1,32 @@
+<svg width="40" height="40" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="40" y2="40" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F0566E"/>
+      <stop offset="0.55" stop-color="#C71A36"/>
+      <stop offset="1" stop-color="#8E0F27"/>
+    </linearGradient>
+    <linearGradient id="shine" x1="0" y1="0" x2="0" y2="20" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="badge" x1="23" y1="23" x2="39" y2="39" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4CC764"/>
+      <stop offset="1" stop-color="#2E9E4B"/>
+    </linearGradient>
+  </defs>
+
+  <!-- rounded app tile -->
+  <rect width="40" height="40" rx="9" fill="url(#bg)"/>
+  <rect x="1" y="1" width="38" height="19" rx="8" fill="url(#shine)"/>
+
+  <!-- the "M" -->
+  <path d="M10 29 V11.5 L19.5 22.5 L29 11.5 V20"
+        fill="none" stroke="#FFFFFF" stroke-width="4.6"
+        stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- update badge: arrow up -->
+  <circle cx="30.5" cy="29.5" r="8" fill="url(#badge)" stroke="#FFFFFF" stroke-width="1.6"/>
+  <path d="M30.5 33.5 V26.6 M27.2 29.6 L30.5 26.2 L33.8 29.6"
+        fill="none" stroke="#FFFFFF" stroke-width="2.2"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

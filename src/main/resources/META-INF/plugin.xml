@@ -1,0 +1,146 @@
+<idea-plugin>
+    <id>com.zukotuutori.mavenassist</id>
+    <name>Maven Assist</name>
+    <vendor>zukotuutori</vendor>
+
+    <description><![CDATA[
+        <p><b>Your friendly co-pilot for <code>pom.xml</code> files.</b> Maven Assist detects whether the
+        directory you point it at already contains a pom — and gives you exactly the right tools for
+        both cases: create a brand-new pom in seconds, or inspect and update an existing one with
+        one-click version upgrades straight from Maven Central. 🚀</p>
+
+        <h2>✨ Features at a glance</h2>
+        <ul>
+            <li>📂 <b>Works in any directory</b> — pick a folder, the whole workflow runs right there.</li>
+            <li>🔍 <b>Automatic detection</b> — instantly switches between "create" and "manage" mode.</li>
+            <li>🆕 <b>Pom creation wizard</b> — parent pom via path, dependencies picked from a searchable list, newest versions pre-selected.</li>
+            <li>⬆️ <b>One-click updates</b> — every dependency gets an <i>Update</i> button that bumps it to the newest version and builds.</li>
+            <li>➕ <b>Searchable dependency picker</b> — every list shows <b>just the name</b> plus a
+                <i>Details</i> button per row (coordinates &amp; versions on demand): search, tick, <i>Add</i> —
+                inserted into the pom automatically, build included.</li>
+            <li>🎯 <b>Per-dependency versions</b> — after picking, a second step lets you choose for
+                <b>each</b> dependency: newest version, a specific version, and auto update.</li>
+            <li>🔄 <b>Auto update on save</b> — flag dependencies (shown <span style="color:green;">green</span>/<span style="color:red;">red</span> in the table) and they jump to the newest version every time you save the project.</li>
+            <li>📌 <b>Extensible manager</b> — give it a name, paste any dependency snippet once, keep it in your catalog forever.</li>
+            <li>🧼 <b>Formatting preserved</b> — edits are surgical; even <code>${property}</code> versions are handled correctly.</li>
+            <li>🎨 <b>Visually customizable plugin page</b> — enter edit mode and <b>drag & drop buttons</b> to
+                move them, <b>click any button</b> to change its text, colors and size live, and use checkboxes
+                to pick per field (version, group id, newest version, …) whether it appears directly in the
+                table or only under <i>Details</i>. Saved permanently.</li>
+        </ul>
+
+        <h2>🚀 How to use</h2>
+
+        <h3>1&#41; Open the tool window</h3>
+        <p>Click <b>Maven Assist</b> on the right edge of the IDE (or <i>View → Tool Windows → Maven Assist</i>).
+        The directory field at the top starts at your project root — pick any other folder with the
+        <b>folder button</b> right beside the field (or type a path and press <b>Enter</b>) and the view
+        rescans instantly.</p>
+
+        <h3>2&#41; No pom.xml yet? Create one 🆕</h3>
+        <ul>
+            <li>Fill in <b>group id</b>, <b>artifact id</b> and <b>version</b>.</li>
+            <li>Optionally pick a <b>parent pom</b> with <i>Choose Path…</i> — coordinates and <code>relativePath</code> are filled in for you.</li>
+            <li><b>Tick</b> the dependencies you want in the list — <b>search</b> to filter it; each row shows
+                only the <b>name</b>, and <i>Details</i> reveals coordinates and the newest version.</li>
+            <li>Leave <i>“Always use the newest version”</i> checked (it is by default) and every selected
+                dependency is created with the latest release from Maven Central.</li>
+            <li>Hit <b>Create pom.xml</b> — done. The view switches straight to the dependency table.</li>
+        </ul>
+
+        <h3>3&#41; Pom already there? Manage it 📋</h3>
+        <ul>
+            <li>See <b>every dependency with its version</b> — including versions resolved from properties.</li>
+            <li><b>Search</b> the list and <b>filter</b> it with one click: <i>Only newest version</i>
+                (already up to date) and <i>Only auto update</i> (flagged for auto-updating).</li>
+            <li>An <b>Open</b> button next to the pom path (and next to the parent pom, when it resolves to
+                a file) opens the file <b>right in the editor</b>.</li>
+            <li><b>Check for Updates</b> fills the <i>Newest Version</i> column for all rows, and
+                <b>Update All</b> bumps <b>every dependency</b> in the pom to its newest version at once
+                (one build at the end).</li>
+            <li>Press <b>Update</b> right next to a row's version and choose <b>Newest version</b> or
+                <b>Custom version…</b> (type your own): Maven Assist rewrites the pom and runs
+                <code>mvn compile</code> — you just watch the notification. ⚡</li>
+            <li>The <b>red trash button</b> at the far right of every row <b>deletes</b> the dependency
+                from the pom — after a confirmation, of course. 🗑️ The trash button <b>next to the
+                search bar</b> enters <b>multi-select mode</b>: tick several dependencies and delete
+                them all at once.</li>
+        </ul>
+
+        <h3>4&#41; Add dependencies ➕</h3>
+        <p>Click <b>Add Dependencies</b> — adding is a friendly <b>two-step flow</b>:</p>
+        <ul>
+            <li><b>Step 1 — pick:</b> type in the <b>search bar</b> and tick what you need. Each row shows only
+                the dependency's <b>name</b>; the <b>Details</b> button reveals group id, artifact id,
+                catalog/pinned version and the newest version from Maven Central.</li>
+            <li><b>Step 2 — configure:</b> press <b>Next</b> and every selected dependency gets its own block
+                with <i>Use newest version</i>, a <i>Specific version</i> field and an <i>Auto update on every
+                project save</i> checkbox — all chosen <b>per dependency</b> (Back returns to the list without
+                losing anything).</li>
+        </ul>
+        <p>Press <b>Add</b> and the dependencies land in your pom exactly as configured; a build kicks off
+        automatically. Auto-updated ones stay on the newest version forever (see below).</p>
+
+        <h3>5&#41; Auto update on every save 🔄</h3>
+        <p>The dependency table has an <b>auto update</b> column — <span style="color:green;">green</span> means on,
+        <span style="color:red;">red</span> means off, and a <b>click toggles it</b>. Whenever you save the project,
+        Maven Assist checks all green-flagged dependencies against Maven Central and bumps them to the newest
+        version automatically (pom rewritten + build). The tool window also <b>reloads itself on every save</b>,
+        so what you see always matches what is on disk.</p>
+
+        <h3>6&#41; Grow your own catalog 📌</h3>
+        <p>Click <b>Add Own to Manager…</b> at the bottom of the <b>Add Dependencies</b> window (the create
+        view also has an <b>Add Dependencies to Manager</b> button), give the dependency a <b>name</b> and paste its code — a
+        <code>&lt;dependency&gt;…&lt;/dependency&gt;</code> block from mvnrepository.com or a plain
+        <code>groupId:artifactId:version</code> line — then press <b>Add</b>. It is stored permanently under that
+        name and shows up in every picker from now on, in all projects, across IDE restarts.
+        Don't need one anymore? Every picker row also has a <b>red trash button</b> that deletes the
+        dependency from the manager entirely (after a confirmation) — built-in catalog entries included.</p>
+
+        <h3>7&#41; Make the page yours 🎨</h3>
+        <p>Click the blue <b>Customize…</b> link in the <b>bottom-left corner</b> of the tool window and a
+        <b>separate customize window</b> opens with a
+        <b>live preview</b> of the whole plugin page — top bar, dependency table (with sample data)
+        and the details-dialog buttons:</p>
+        <ul>
+            <li>🖱️ <b>Drag & drop</b> any button — it lifts off and <b>sticks to your mouse</b> as a ghost while
+                an animated gap glides to where it would land. Drop it <b>anywhere</b>: reorder within a section
+                or move it between the top bar and the details dialog. Moved buttons keep
+                working (e.g. <i>Update to Newest Version</i> in the main window acts on the selected row).</li>
+            <li>↔️ <b>Resize by dragging</b> — grab a button's <b>right edge</b> to pull it wider, the
+                <b>bottom edge</b> to make it taller, or the <b>corner</b> for both, exactly like a window.
+                A resized button keeps its size; untouched ones keep filling the row.</li>
+            <li>🎨 <b>Click a button</b> in the preview and a small floating editor appears: change its
+                <b>text</b>, <b>background & text color</b>, <b>width</b>, <b>height</b> and <b>font size</b> —
+                every change shows up in the preview <b>instantly</b>, so you always see exactly what you get.</li>
+            <li>☑️ The <b>Visible fields</b> checkboxes decide for every dependency field (name, group id,
+                artifact id, version, newest version, auto update) whether it is shown <b>directly in the
+                table</b> or <b>under "Details"</b> — preview columns appear/disappear as you tick.</li>
+            <li>💾 The real plugin window is untouched while you experiment. Press <b>Save</b> and your design
+                is applied to it and kept forever (across restarts); <b>Cancel</b> throws the changes away.
+                <i>Reset All to Defaults</i> returns to the factory layout.</li>
+        </ul>
+
+        <h2>💡 Good to know</h2>
+        <ul>
+            <li>Builds use your project's <code>mvnw</code> wrapper if present, otherwise <code>mvn</code> from the PATH.</li>
+            <li>Automatic builds after pom changes run <code>mvn compile</code> (fast). Need the full thing?
+                The <b>MVN Clean Install</b> button at the very bottom runs <code>mvn clean install</code>.</li>
+            <li>No Maven installed? The plugin automatically falls back to the <b>Maven bundled with your
+                IDE</b> — so builds usually just work. If even that is missing, <b>MVN Clean Install</b>
+                <b>offers to install Maven for you</b> (Homebrew/winget, or downloaded from apache.org —
+                into the project or for the whole machine, your choice).</li>
+            <li>Version lookups run in the background; the IDE never freezes. 🧊</li>
+        </ul>
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <toolWindow id="Maven Assist"
+                    anchor="right"
+                    icon="/icons/mavenAssist.svg"
+                    factoryClass="com.zukotuutori.mavenassist.ui.MavenAssistToolWindowFactory"/>
+        <notificationGroup id="Maven Assist" displayType="BALLOON"/>
+    </extensions>
+</idea-plugin>
