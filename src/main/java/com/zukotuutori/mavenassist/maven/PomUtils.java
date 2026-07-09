@@ -120,7 +120,56 @@ public final class PomUtils {
         return candidate.isFile() ? candidate : null;
     }
 
+    /** The pom's own &lt;packaging&gt;, or "jar" (Maven's default) if the tag is absent. */
+    public static @NotNull String readPackaging(@NotNull File pomFile) throws IOException {
+        String packaging = childText(parse(pomFile), "packaging");
+        return packaging == null || packaging.isEmpty() ? "jar" : packaging;
+    }
+
     // ---------------------------------------------------------------- editing
+
+    /**
+     * Sets the pom's &lt;packaging&gt; to "pom" — Maven requires that of every parent pom.
+     * The rest of the file keeps its formatting. Returns false if it already was "pom".
+     */
+    public static boolean ensurePomPackaging(@NotNull File pomFile) throws IOException {
+        if ("pom".equals(readPackaging(pomFile))) {
+            return false;
+        }
+        Path path = pomFile.toPath();
+        String content = Files.readString(path, StandardCharsets.UTF_8);
+
+        List<int[]> excluded = excludedRegions(content);
+        Matcher parentBlock = Pattern.compile("<parent>.*?</parent>", Pattern.DOTALL).matcher(content);
+        if (parentBlock.find()) {
+            excluded.add(new int[]{parentBlock.start(), parentBlock.end()});
+        }
+        Matcher tag = Pattern.compile("<packaging>\\s*[^<]*\\s*</packaging>").matcher(content);
+        while (tag.find()) {
+            if (inExcludedRegion(excluded, tag.start())) {
+                continue;
+            }
+            Files.writeString(path, content.substring(0, tag.start())
+                    + "<packaging>pom</packaging>" + content.substring(tag.end()), StandardCharsets.UTF_8);
+            return true;
+        }
+        // No tag yet (Maven defaulted to jar): insert one, like setParentPom does.
+        Matcher modelVersion = Pattern.compile("<modelVersion>.*?</modelVersion>", Pattern.DOTALL).matcher(content);
+        if (modelVersion.find()) {
+            content = content.substring(0, modelVersion.end())
+                    + "\n    <packaging>pom</packaging>" + content.substring(modelVersion.end());
+        } else {
+            int projectTag = content.indexOf("<project");
+            int open = projectTag < 0 ? -1 : content.indexOf('>', projectTag);
+            if (open < 0) {
+                throw new IOException("Invalid pom.xml: no <project> tag found");
+            }
+            content = content.substring(0, open + 1)
+                    + "\n    <packaging>pom</packaging>" + content.substring(open + 1);
+        }
+        Files.writeString(path, content, StandardCharsets.UTF_8);
+        return true;
+    }
 
     /** Sets or replaces the &lt;parent&gt; block of the pom; the rest of the file keeps its formatting. */
     public static void setParentPom(@NotNull File pomFile,

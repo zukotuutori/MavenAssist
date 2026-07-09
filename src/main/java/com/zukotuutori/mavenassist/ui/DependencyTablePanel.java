@@ -903,6 +903,9 @@ public class DependencyTablePanel extends JPanel {
             return;
         }
         try {
+            if (!ensureParentPackaging(parentFile)) {
+                return;
+            }
             PomUtils.PomInfo parentInfo = PomUtils.readPomInfo(parentFile);
             PomUtils.setParentPom(pomFile, parentInfo, parentFile);
             LocalFileSystem.getInstance().refreshAndFindFileByIoFile(pomFile);
@@ -913,6 +916,31 @@ public class DependencyTablePanel extends JPanel {
         } catch (IOException e) {
             Notifier.error(project, "Could not set parent pom: " + e.getMessage());
         }
+    }
+
+    /**
+     * Maven refuses parent poms whose packaging is not "pom". Offers to fix the chosen
+     * parent; returns false when the user cancels instead.
+     */
+    private boolean ensureParentPackaging(@NotNull File parentFile) throws IOException {
+        String packaging = PomUtils.readPackaging(parentFile);
+        if ("pom".equals(packaging)) {
+            return true;
+        }
+        int answer = com.intellij.openapi.ui.Messages.showYesNoDialog(project,
+                "Maven requires a parent pom to have <packaging>pom</packaging>, but\n"
+                        + parentFile.getAbsolutePath() + "\nhas \"" + packaging + "\".\n\n"
+                        + "Change its packaging to \"pom\"? (Its own build output changes accordingly.)",
+                "Fix Parent Packaging",
+                "Change to \"pom\"", "Cancel",
+                com.intellij.openapi.ui.Messages.getWarningIcon());
+        if (answer != com.intellij.openapi.ui.Messages.YES) {
+            Notifier.warn(project, "Parent pom not set — its packaging must be \"pom\".");
+            return false;
+        }
+        PomUtils.ensurePomPackaging(parentFile);
+        LocalFileSystem.getInstance().refreshAndFindFileByIoFile(parentFile);
+        return true;
     }
 
     private void openAddDependenciesDialog() {

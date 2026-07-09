@@ -257,6 +257,36 @@ public class CreatePomPanel extends JPanel {
         }
     }
 
+    /**
+     * Maven refuses parent poms whose packaging is not "pom". Offers to fix the chosen
+     * parent; returns false when the user cancels instead.
+     */
+    private boolean ensureParentPackaging(@NotNull File parentFile) {
+        try {
+            String packaging = PomUtils.readPackaging(parentFile);
+            if ("pom".equals(packaging)) {
+                return true;
+            }
+            int answer = com.intellij.openapi.ui.Messages.showYesNoDialog(project,
+                    "Maven requires a parent pom to have <packaging>pom</packaging>, but\n"
+                            + parentFile.getAbsolutePath() + "\nhas \"" + packaging + "\".\n\n"
+                            + "Change its packaging to \"pom\"? (Its own build output changes accordingly.)",
+                    "Fix Parent Packaging",
+                    "Change to \"pom\"", "Cancel",
+                    com.intellij.openapi.ui.Messages.getWarningIcon());
+            if (answer != com.intellij.openapi.ui.Messages.YES) {
+                Notifier.warn(project, "pom.xml not created — the parent's packaging must be \"pom\".");
+                return false;
+            }
+            PomUtils.ensurePomPackaging(parentFile);
+            LocalFileSystem.getInstance().refreshAndFindFileByIoFile(parentFile);
+            return true;
+        } catch (java.io.IOException e) {
+            Notifier.error(project, "Could not read parent pom: " + e.getMessage());
+            return false;
+        }
+    }
+
     // ---------------------------------------------------------------- action
 
     private void createPom() {
@@ -277,6 +307,9 @@ public class CreatePomPanel extends JPanel {
         File parentPomFile = parentPath.isEmpty() ? null : new File(parentPath);
         if (parentPomFile != null && !parentPomFile.isFile()) {
             Notifier.warn(project, "Parent pom not found: " + parentPath);
+            return;
+        }
+        if (parentPomFile != null && !ensureParentPackaging(parentPomFile)) {
             return;
         }
 
