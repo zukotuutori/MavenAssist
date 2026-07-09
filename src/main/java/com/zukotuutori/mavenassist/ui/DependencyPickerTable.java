@@ -2,35 +2,33 @@ package com.zukotuutori.mavenassist.ui;
 
 import com.zukotuutori.mavenassist.model.Dependency;
 import com.zukotuutori.mavenassist.services.DependencyManagerService;
-import com.intellij.icons.AllIcons;
 import com.intellij.openapi.ui.Messages;
-import com.intellij.ui.JBColor;
 import com.intellij.ui.SearchTextField;
 import com.intellij.ui.table.JBTable;
-import com.intellij.util.IconUtil;
 import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.AbstractCellEditor;
-import javax.swing.Icon;
 import javax.swing.JButton;
+import javax.swing.JMenuItem;
+import javax.swing.JPopupMenu;
 import javax.swing.JTable;
-import javax.swing.SwingConstants;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import javax.swing.table.AbstractTableModel;
-import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.TableCellEditor;
 import javax.swing.table.TableCellRenderer;
-import java.awt.Color;
 import java.awt.Component;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
 
@@ -39,36 +37,56 @@ import java.util.function.Consumer;
  * the pom-creation view): searchable rows showing only a checkbox, the dependency's
  * <b>name</b> and a per-row <b>Show Details</b> button — everything else (coordinates,
  * versions) lives behind the details callback. Checked state survives filtering.
+ *
+ * <p>The pom-creation view enables an extra <b>Version</b> column whose button offers
+ * "Newest version" (the default) or a custom version per dependency.</p>
  */
 class DependencyPickerTable extends JBTable {
 
-    private static final int COL_CHECK = 0;
-    private static final int COL_NAME = 1;
-    private static final int COL_DETAILS = 2;
-    private static final int COL_DELETE = 3;
+    private final int colCheck = 0;
+    private final int colName = 1;
+    /** -1 when the version column is disabled. */
+    private final int colVersion;
+    private final int colDetails;
+    private final int colDelete;
 
     private final List<Dependency> all = new ArrayList<>();
     private final List<Dependency> filtered = new ArrayList<>();
     private final Set<String> checkedKeys = new HashSet<>();
+    /** groupId:artifactId → user-chosen version; absent = "use the newest". */
+    private final Map<String, String> customVersions = new HashMap<>();
     private final PickModel model = new PickModel();
     private final Consumer<Dependency> detailsHandler;
 
     private String query = "";
 
     DependencyPickerTable(@NotNull Consumer<Dependency> detailsHandler) {
+        this(detailsHandler, false);
+    }
+
+    DependencyPickerTable(@NotNull Consumer<Dependency> detailsHandler, boolean withVersionColumn) {
         this.detailsHandler = detailsHandler;
+        this.colVersion = withVersionColumn ? 2 : -1;
+        this.colDetails = withVersionColumn ? 3 : 2;
+        this.colDelete = withVersionColumn ? 4 : 3;
         setModel(model);
         TablePills.modernize(this);
         getTableHeader().setReorderingAllowed(false);
-        getColumnModel().getColumn(COL_CHECK).setMaxWidth(JBUI.scale(30));
+        getColumnModel().getColumn(colCheck).setMaxWidth(JBUI.scale(30));
+        if (withVersionColumn) {
+            VersionButtonRenderer versionRenderer = new VersionButtonRenderer();
+            getColumnModel().getColumn(colVersion).setCellRenderer(versionRenderer);
+            getColumnModel().getColumn(colVersion).setCellEditor(new VersionButtonEditor());
+            getColumnModel().getColumn(colVersion).setMaxWidth(JBUI.scale(140));
+        }
         DetailsButtonRenderer renderer = new DetailsButtonRenderer();
-        getColumnModel().getColumn(COL_DETAILS).setCellRenderer(renderer);
-        getColumnModel().getColumn(COL_DETAILS).setCellEditor(new DetailsButtonEditor());
-        getColumnModel().getColumn(COL_DETAILS)
+        getColumnModel().getColumn(colDetails).setCellRenderer(renderer);
+        getColumnModel().getColumn(colDetails).setCellEditor(new DetailsButtonEditor());
+        getColumnModel().getColumn(colDetails)
                 .setMaxWidth(Math.max(JBUI.scale(120), renderer.getPreferredSize().width + JBUI.scale(8)));
-        getColumnModel().getColumn(COL_DELETE).setCellRenderer(
+        getColumnModel().getColumn(colDelete).setCellRenderer(
                 new TablePills.DeleteRenderer("Delete this dependency from the manager (all projects)"));
-        getColumnModel().getColumn(COL_DELETE).setMaxWidth(JBUI.scale(44));
+        getColumnModel().getColumn(colDelete).setMaxWidth(JBUI.scale(44));
 
         // Click on the trash cell deletes the dependency from the manager (after confirmation).
         addMouseListener(new MouseAdapter() {
@@ -76,7 +94,7 @@ class DependencyPickerTable extends JBTable {
             public void mouseClicked(MouseEvent e) {
                 int row = rowAtPoint(e.getPoint());
                 int column = columnAtPoint(e.getPoint());
-                if (row >= 0 && column >= 0 && convertColumnIndexToModel(column) == COL_DELETE) {
+                if (row >= 0 && column >= 0 && convertColumnIndexToModel(column) == colDelete) {
                     confirmAndDeleteFromManager(convertRowIndexToModel(row));
                 }
             }
@@ -98,6 +116,7 @@ class DependencyPickerTable extends JBTable {
         DependencyManagerService.getInstance().removeDependency(d);
         all.removeIf(dep -> dep.getName().equalsIgnoreCase(d.getName()) && dep.getKey().equals(d.getKey()));
         checkedKeys.remove(d.getKey());
+        customVersions.remove(d.getKey());
         applyFilter();
     }
 
@@ -147,13 +166,31 @@ class DependencyPickerTable extends JBTable {
 
     /** The checked dependencies, one per groupId:artifactId (duplicate names collapse). */
     @NotNull List<Dependency> getCheckedDependencies() {
-        java.util.Map<String, Dependency> byKey = new java.util.LinkedHashMap<>();
+        Map<String, Dependency> byKey = new LinkedHashMap<>();
         for (Dependency d : all) {
             if (checkedKeys.contains(d.getKey())) {
                 byKey.putIfAbsent(d.getKey(), d);
             }
         }
         return new ArrayList<>(byKey.values());
+    }
+
+    /** groupId:artifactId → the version the user pinned via the Version button. */
+    @NotNull Map<String, String> getCustomVersions() {
+        return new HashMap<>(customVersions);
+    }
+
+    /** Pins a version for the dependency; pinning implies wanting it, so the row is ticked too. */
+    void setCustomVersion(@NotNull String dependencyKey, @NotNull String version) {
+        customVersions.put(dependencyKey, version);
+        checkedKeys.add(dependencyKey);
+        model.fireTableDataChanged();
+    }
+
+    /** Back to "use the newest version". */
+    void clearCustomVersion(@NotNull String dependencyKey) {
+        customVersions.remove(dependencyKey);
+        model.fireTableDataChanged();
     }
 
     /** Ticks every dependency currently visible (i.e. matching the active filter). */
@@ -197,11 +234,41 @@ class DependencyPickerTable extends JBTable {
         return d.getName().isEmpty() ? d.getArtifactId() : d.getName();
     }
 
+    /** The label of a row's Version button: the pinned version, or "Newest". */
+    private @NotNull String versionLabel(@NotNull Dependency d) {
+        String custom = customVersions.get(d.getKey());
+        return custom == null ? "Newest" : custom;
+    }
+
+    /** "Newest version" clears the pin, "Custom version..." asks for one. */
+    private void showVersionMenu(@NotNull Dependency d, int viewRow) {
+        JPopupMenu menu = new JPopupMenu();
+        JMenuItem newest = new JMenuItem("Newest version");
+        newest.addActionListener(e -> clearCustomVersion(d.getKey()));
+        menu.add(newest);
+        JMenuItem custom = new JMenuItem("Custom version...");
+        custom.addActionListener(e -> {
+            String input = Messages.showInputDialog(this,
+                    "Custom version for " + d.getKey() + ":\n(leave empty to use the newest version)",
+                    "Custom Version", null, customVersions.get(d.getKey()), null);
+            if (input == null) {
+                return; // cancelled
+            }
+            if (input.trim().isEmpty()) {
+                clearCustomVersion(d.getKey());
+            } else {
+                setCustomVersion(d.getKey(), input.trim());
+            }
+        });
+        menu.add(custom);
+        java.awt.Rectangle cell = getCellRect(viewRow, colVersion, true);
+        menu.show(this, cell.x, cell.y + cell.height);
+    }
+
     // ---------------------------------------------------------------- model
 
-    /** Checkbox + name only; everything else lives behind "Show Details". */
+    /** Checkbox + name (+ optional version pin); everything else lives behind "Show Details". */
     private class PickModel extends AbstractTableModel {
-        private final String[] columns = {"", "Name", "", ""};
 
         @Override
         public int getRowCount() {
@@ -210,38 +277,51 @@ class DependencyPickerTable extends JBTable {
 
         @Override
         public int getColumnCount() {
-            return columns.length;
+            return colDelete + 1;
         }
 
         @Override
         public String getColumnName(int column) {
-            return columns[column];
+            if (column == colName) {
+                return "Name";
+            }
+            if (column == colVersion) {
+                return "Version";
+            }
+            return "";
         }
 
         @Override
         public Class<?> getColumnClass(int columnIndex) {
-            return columnIndex == COL_CHECK ? Boolean.class : Object.class;
+            return columnIndex == colCheck ? Boolean.class : Object.class;
         }
 
         @Override
         public boolean isCellEditable(int rowIndex, int columnIndex) {
-            return columnIndex == COL_CHECK || columnIndex == COL_DETAILS;
+            return columnIndex == colCheck || columnIndex == colDetails || columnIndex == colVersion;
         }
 
         @Override
         public Object getValueAt(int rowIndex, int columnIndex) {
             Dependency d = filtered.get(rowIndex);
-            return switch (columnIndex) {
-                case COL_CHECK -> checkedKeys.contains(d.getKey());
-                case COL_NAME -> displayName(d);
-                case COL_DETAILS -> "Details";
-                default -> "";
-            };
+            if (columnIndex == colCheck) {
+                return checkedKeys.contains(d.getKey());
+            }
+            if (columnIndex == colName) {
+                return displayName(d);
+            }
+            if (columnIndex == colVersion) {
+                return versionLabel(d);
+            }
+            if (columnIndex == colDetails) {
+                return "Details";
+            }
+            return "";
         }
 
         @Override
         public void setValueAt(Object aValue, int rowIndex, int columnIndex) {
-            if (columnIndex == COL_CHECK && rowIndex < filtered.size()) {
+            if (columnIndex == colCheck && rowIndex < filtered.size()) {
                 Dependency d = filtered.get(rowIndex);
                 if (Boolean.TRUE.equals(aValue)) {
                     checkedKeys.add(d.getKey());
@@ -284,6 +364,48 @@ class DependencyPickerTable extends JBTable {
         public Component getTableCellEditorComponent(JTable table, Object value, boolean isSelected,
                                                      int row, int column) {
             editedRow = row;
+            return button;
+        }
+
+        @Override
+        public @Nullable Object getCellEditorValue() {
+            return null;
+        }
+    }
+
+    /** Shows the pinned version (or "Newest") and opens the newest/custom menu. */
+    private class VersionButtonRenderer extends JButton implements TableCellRenderer {
+        VersionButtonRenderer() {
+            setToolTipText("Choose the version this dependency is created with");
+        }
+
+        @Override
+        public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected,
+                                                       boolean hasFocus, int row, int column) {
+            setText(String.valueOf(value));
+            return this;
+        }
+    }
+
+    private class VersionButtonEditor extends AbstractCellEditor implements TableCellEditor {
+        private final JButton button = new JButton();
+        private int editedRow = -1;
+
+        VersionButtonEditor() {
+            button.addActionListener(e -> {
+                int row = editedRow;
+                fireEditingStopped();
+                if (row >= 0 && row < filtered.size()) {
+                    showVersionMenu(filtered.get(row), row);
+                }
+            });
+        }
+
+        @Override
+        public Component getTableCellEditorComponent(JTable table, Object value, boolean isSelected,
+                                                     int row, int column) {
+            editedRow = row;
+            button.setText(String.valueOf(value));
             return button;
         }
 

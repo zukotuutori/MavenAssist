@@ -37,6 +37,7 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -52,10 +53,11 @@ public class CreatePomPanel extends JPanel {
     private final JTextField artifactIdField = new JTextField("my-app");
     private final JTextField versionField = new JTextField("1.0.0");
     private final JTextField parentPomField = new JTextField();
-    private final JBCheckBox newestVersionsCheck =
-            new JBCheckBox("Always use the newest version of each dependency (from Maven Central)", true);
+    private final JBCheckBox newestVersionsCheck = new JBCheckBox(
+            "Install every dependency with the newest version (unless a custom version is chosen)", true);
     private final SearchTextField dependencySearchField = new SearchTextField();
-    private final DependencyPickerTable dependencyPicker = new DependencyPickerTable(this::showDependencyDetails);
+    private final DependencyPickerTable dependencyPicker =
+            new DependencyPickerTable(this::showDependencyDetails, true);
 
     private File targetDirectory;
 
@@ -111,12 +113,6 @@ public class CreatePomPanel extends JPanel {
         gbc.weightx = 1;
         form.add(parentPanel, gbc);
 
-        gbc.gridy = row + 1;
-        gbc.gridx = 0;
-        gbc.gridwidth = 2;
-        newestVersionsCheck.setOpaque(false);
-        form.add(newestVersionsCheck, gbc);
-
         return form;
     }
 
@@ -162,6 +158,8 @@ public class CreatePomPanel extends JPanel {
 
         panel.add(header, BorderLayout.NORTH);
         panel.add(new JBScrollPane(dependencyPicker), BorderLayout.CENTER);
+        newestVersionsCheck.setOpaque(false);
+        panel.add(newestVersionsCheck, BorderLayout.SOUTH);
         dependencyPicker.bindSearch(dependencySearchField);
         return panel;
     }
@@ -315,6 +313,7 @@ public class CreatePomPanel extends JPanel {
 
         List<Dependency> selected = getSelectedDependencies();
         boolean useNewest = newestVersionsCheck.isSelected();
+        Map<String, String> customVersions = dependencyPicker.getCustomVersions();
         File pomFile = new File(directory, "pom.xml");
 
         new Task.Backgroundable(project, "Maven Assist: Creating pom.xml", true) {
@@ -330,12 +329,17 @@ public class CreatePomPanel extends JPanel {
                     List<Dependency> resolved = new ArrayList<>();
                     for (Dependency dep : selected) {
                         indicator.checkCanceled();
-                        String depVersion = dep.getVersion();
-                        if (useNewest) {
-                            indicator.setText("Fetching newest version of " + dep.getKey() + "...");
-                            String latest = MavenCentralClient.getLatestVersion(dep.getGroupId(), dep.getArtifactId());
-                            if (latest != null) {
-                                depVersion = latest;
+                        // A pinned version always wins; otherwise the checkbox decides
+                        // between the newest release and the catalog version.
+                        String depVersion = customVersions.get(dep.getKey());
+                        if (depVersion == null) {
+                            depVersion = dep.getVersion();
+                            if (useNewest) {
+                                indicator.setText("Fetching newest version of " + dep.getKey() + "...");
+                                String latest = MavenCentralClient.getLatestVersion(dep.getGroupId(), dep.getArtifactId());
+                                if (latest != null) {
+                                    depVersion = latest;
+                                }
                             }
                         }
                         resolved.add(dep.withVersion(depVersion));
