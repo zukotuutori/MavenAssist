@@ -1,7 +1,6 @@
 package com.zukotuutori.mavenassist.ui;
 
 import com.zukotuutori.mavenassist.services.UiCustomizationService;
-import com.zukotuutori.mavenassist.services.UiCustomizationService.ButtonId;
 import com.zukotuutori.mavenassist.util.Notifier;
 import com.intellij.icons.AllIcons;
 import com.intellij.openapi.Disposable;
@@ -49,7 +48,6 @@ public class MavenAssistPanel extends JPanel implements Disposable {
     private final JPanel cardPanel = new JPanel(cards);
     private final CreatePomPanel createPanel;
     private final DependencyTablePanel tablePanel;
-    private final JPanel directoryButtonsRow = new JPanel();
     private final Runnable customizationListener = this::onCustomizationChanged;
 
     private String activeCard = CARD_EMPTY;
@@ -59,10 +57,6 @@ public class MavenAssistPanel extends JPanel implements Disposable {
         this.project = project;
         this.createPanel = new CreatePomPanel(project, this::refresh);
         this.tablePanel = new DependencyTablePanel(project);
-
-        // One shared action map: buttons can be moved into any section and still work.
-        java.util.Map<ButtonId, Runnable> actions = new java.util.EnumMap<>(ButtonId.class);
-        tablePanel.registerSharedActions(actions);
 
         add(buildDirectoryBar(), BorderLayout.NORTH);
 
@@ -130,7 +124,6 @@ public class MavenAssistPanel extends JPanel implements Disposable {
     }
 
     private @NotNull JPanel buildDirectoryBar() {
-        // Field on top, buttons below (only shown when the user placed buttons up here).
         JPanel inner = new JPanel(new BorderLayout(0, JBUI.scale(4)));
         inner.setOpaque(false);
 
@@ -144,11 +137,6 @@ public class MavenAssistPanel extends JPanel implements Disposable {
         fieldRow.add(browseButton, BorderLayout.EAST);
         inner.add(fieldRow, BorderLayout.NORTH);
 
-        directoryButtonsRow.setLayout(new javax.swing.BoxLayout(directoryButtonsRow, javax.swing.BoxLayout.X_AXIS));
-        directoryButtonsRow.setOpaque(false);
-        rebuildDirectoryButtons();
-        inner.add(directoryButtonsRow, BorderLayout.CENTER);
-
         directoryField.addActionListener(e -> refresh());
 
         JPanel bar = new JPanel(new BorderLayout());
@@ -161,8 +149,8 @@ public class MavenAssistPanel extends JPanel implements Disposable {
     private @NotNull JPanel buildBottomBar() {
         ActionLink customizeLink = new ActionLink("Customize...",
                 (java.awt.event.ActionListener) e -> new CustomizePageDialog(project).show());
-        customizeLink.setToolTipText("Opens the customize window: drag buttons to move them, click a "
-                + "button to change its text, colors and size — applied here when you press Save.");
+        customizeLink.setToolTipText("Choose which dependency fields appear in the table "
+                + "and which only behind the Details button.");
 
         JButton cleanInstallButton = new JButton("MVN Clean Install",
                 com.intellij.util.IconUtil.colorize(AllIcons.Actions.Execute, java.awt.Color.WHITE));
@@ -225,34 +213,8 @@ public class MavenAssistPanel extends JPanel implements Disposable {
                         new String[]{"clean", "install"}, null));
     }
 
-    /** Whatever buttons the user placed in the top bar; hidden entirely when there are none. */
-    private void rebuildDirectoryButtons() {
-        UiCustomizationService service = UiCustomizationService.getInstance();
-        directoryButtonsRow.removeAll();
-        for (ButtonId id : service.buttonsIn(UiCustomizationService.Group.DIRECTORY_BAR)) {
-            Runnable action = tablePanel.getSharedActions().get(id);
-            if (action == null) {
-                continue;
-            }
-            JButton button = new JButton();
-            service.applyTo(id, button);
-            button.addActionListener(e -> action.run());
-            directoryButtonsRow.add(UiEditSupport.wrap(button, false));
-        }
-        directoryButtonsRow.setVisible(directoryButtonsRow.getComponentCount() > 0);
-        directoryButtonsRow.revalidate();
-        directoryButtonsRow.repaint();
-    }
-
-    /**
-     * Refreshes this page when the customize window finishes (Save or Cancel).
-     * While that window is open (edit mode), its live preview changes are ignored here.
-     */
+    /** Rebuilds the table's columns after the visible fields were changed. */
     private void onCustomizationChanged() {
-        if (UiCustomizationService.getInstance().isEditMode()) {
-            return;
-        }
-        rebuildDirectoryButtons();
         tablePanel.applyCustomization();
     }
 

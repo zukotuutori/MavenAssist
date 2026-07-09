@@ -2,8 +2,6 @@ package com.zukotuutori.mavenassist.ui;
 
 import com.zukotuutori.mavenassist.model.Dependency;
 import com.zukotuutori.mavenassist.services.DependencyManagerService;
-import com.zukotuutori.mavenassist.services.UiCustomizationService;
-import com.zukotuutori.mavenassist.services.UiCustomizationService.ButtonId;
 import com.intellij.icons.AllIcons;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.ui.JBColor;
@@ -235,7 +233,7 @@ class DependencyPickerTable extends JBTable {
             return switch (columnIndex) {
                 case COL_CHECK -> checkedKeys.contains(d.getKey());
                 case COL_NAME -> displayName(d);
-                case COL_DETAILS -> UiCustomizationService.getInstance().getButtonText(ButtonId.SHOW_DETAILS);
+                case COL_DETAILS -> "Details";
                 default -> "";
             };
         }
@@ -253,10 +251,10 @@ class DependencyPickerTable extends JBTable {
         }
     }
 
-    /** Same look as the main table's details button (including the user's customization). */
+    /** Same look as the main table's details button. */
     private static class DetailsButtonRenderer extends JButton implements TableCellRenderer {
         DetailsButtonRenderer() {
-            UiCustomizationService.getInstance().applyTo(ButtonId.SHOW_DETAILS, this);
+            super("Details");
         }
 
         @Override
@@ -271,7 +269,7 @@ class DependencyPickerTable extends JBTable {
         private int editedRow = -1;
 
         DetailsButtonEditor() {
-            UiCustomizationService.getInstance().applyTo(ButtonId.SHOW_DETAILS, button);
+            button.setText("Details");
             button.addActionListener(e -> {
                 int row = editedRow;
                 fireEditingStopped();

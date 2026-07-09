@@ -1,60 +1,83 @@
-# Maven Assist (IntelliJ Plugin)
+# Maven Assist
 
-A tool window plugin for IntelliJ-based IDEs that helps you manage `pom.xml` files.
+A tool window for IntelliJ-based IDEs that takes the tedium out of `pom.xml` files.
+
+Point it at a directory. If there is no pom, Maven Assist helps you create one: from a form, or from a
+template you saved earlier. If a pom is already there, it lists every dependency with its version and lets
+you upgrade, add or remove them without leaving the IDE.
+
+---
 
 ## Features
 
-- **Tool window** ("Maven Assist", right side of the IDE) with a directory chooser 
-  pick any directory with the **folder button** beside the field (or type a path and
-  press Enter); the whole workflow runs in that directory.
-- **No pom.xml found?** Create one:
-  - enter group id / artifact id / version,
-  - optionally choose a **parent pom via path** ("Choose Path..."),
-  - pick dependencies from the manager in a **searchable list** (rows show only the
-    **name**; a **Details** button reveals coordinates and the newest version),
-  - **"Always use the newest version"** is pre-selected versions are fetched live from Maven Central while creating.
-- **pom.xml found?** You see **every dependency with its version**, and **Open** buttons
-  next to the pom path (and the parent pom, when it resolves to a file) open them in the editor:
-  - **Search bar and filters** above the table: type to search, tick **Only newest
-    version** (already up to date) or **Only auto update** (flagged rows) to filter.
-  - **Update** button next to each version: choose **Newest version** (from Maven Central)
-    or **Custom version...** (type your own) the pom is rewritten (formatting preserved,
-    `${property}` versions supported) and `mvn compile` runs.
-  - **Red trash button** at the far right of every row deletes the dependency from the
-    pom (with an "are you sure" confirmation). The trash button **next to the search bar**
-    enters multi-select mode: tick several dependencies and delete them all at once.
-  - **Check for Updates** fills the "Newest Version" column for all dependencies;
-    **Update All** bumps every dependency in the pom to its newest version at once.
-  - **Add Dependencies** is a **two-step flow**: step 1 is a **search bar** and a list
-    showing **only the dependency names** each row has a **Details** button
-    (group id, artifact id, catalog/pinned version, newest version). **Next** leads to
-    step 2 with one block **per selected dependency**: use newest version, a specific
-    version, and auto update, then **Add** inserts them into the pom and a build runs.
-  - **Add Own to Manager...** (bottom of the Add Dependencies window): paste dependency
-    XML (`<dependency>...</dependency>`, e.g. from mvnrepository.com) or plain
-    `groupId:artifactId:version` lines, click **Add** they are stored **permanently**
-    (application-level, survives IDE restarts), appear in all dependency lists from then
-    on, and the picker list refreshes immediately. Each picker row also has a **red trash
-    button** that deletes the dependency from the manager entirely (with confirmation),
-    built-in catalog entries included.
-- **Visually customizable plugin page** click the blue **Customize...** link in the
-  bottom-left corner of the tool window and
-  a **separate customize window** opens with a **live preview** of the whole page (top
-  bar, dependency table with sample data, details-dialog buttons):
-  - **Drag & drop** any button, it lifts off and sticks to the mouse as a ghost while an
-    animated gap glides to the landing spot. Buttons can be moved **anywhere**: reordered
-    within a section or across sections (top bar ↔ details dialog), and
-    they keep working in their new home (e.g. *Update to Newest Version* in the main
-    window acts on the selected table row).
-  - **Resize by dragging**: grab a button's right edge to pull it wider, the bottom edge
-    to make it taller, or the corner for both like resizing a window. Resized buttons
-    keep their size; untouched ones keep filling the row.
-  - **Click a button** in the preview to open a small floating editor for its **text,
-    background/text color, width, height and font size** every change shows in the
-    preview instantly.
-  - **Visible fields** checkboxes decide for each dependency field (name, group id,
-    artifact id, version, newest version, auto update) whether it appears **directly in
-    the table** or **under "Details"**.
-  - The real plugin window stays untouched while you experiment: **Save** applies the
-    design to it and persists it across IDE restarts, **Cancel** discards, **Reset All
-    to Defaults** restores the factory layout.
+### Create a pom
+
+Fill in the coordinates, optionally choose a parent pom, and tick the dependencies you want from a
+searchable catalog. **Select All** takes everything the current search turned up. Leave *Always use the
+newest version* checked and each dependency is written with its latest release from Maven Central.
+
+### Reuse a setup with templates
+
+Save a whole configuration: coordinates, parent pom, the newest-version setting and the ticked
+dependencies: under a name, then apply it in any project with two clicks. Templates are created and
+deleted from the same window and persist across IDE restarts.
+
+### Manage an existing pom
+
+Every dependency is listed with its version, including versions resolved from `${properties}`. Search the
+table, or filter it down to *Only newest version* or *Only auto update*. **Check for Updates** fills in the
+newest version for every row; **Update All** bumps the entire pom in one go.
+
+Press **Update** beside a single version to choose the newest release or type a specific one. Maven Assist
+rewrites the pom, runs `mvn compile`, and reports the result as a notification.
+
+### Keep dependencies fresh automatically
+
+Flag any dependency and it is checked against Maven Central every time you save the project, then bumped
+if it has fallen behind.
+
+### Add and remove dependencies
+
+Adding is a two-step flow: pick what you need, then configure each dependency individually: newest
+version, a pinned version, or auto-update. Removing is a red trash button per row, plus a multi-select mode
+for clearing out several at once.
+
+### Build your own catalog
+
+Paste a `<dependency>…</dependency>` block from mvnrepository.com, or a plain `groupId:artifactId:version`
+line, give it a name, and it appears in every dependency picker from then on: in all projects.
+
+## Careful edits
+
+Maven Assist rewrites your pom with targeted text replacements rather than reformatting the file, so your
+indentation and comments survive untouched. `${property}` versions are updated at their definition, and
+entries inside `<dependencyManagement>` or `<profiles>` are never modified when you update or delete a
+dependency from the project's own `<dependencies>` block.
+
+---
+
+## Requirements
+
+- IntelliJ IDEA, or another IntelliJ-based IDE, **2025.1 or newer**.
+- Maven, but you do not have to install it yourself. Maven Assist uses your project's `mvnw` wrapper if
+  there is one, otherwise `mvn` from your `PATH`, otherwise the copy bundled with your IDE. If none of
+  those exist, it offers to install Maven for you.
+
+---
+
+## Privacy
+
+Maven Assist contacts exactly two places, and only when you ask it to:
+
+- **`search.maven.org`** — to look up the newest version of a dependency. The only data sent is the
+  `groupId` and `artifactId` being looked up.
+- **`dlcdn.apache.org` / `archive.apache.org`** — to download Maven, if you accept the offer to install it.
+
+There is no telemetry and no analytics. Your templates, dependency catalog and layout are stored locally in
+your IDE's configuration directory.
+
+---
+
+## Licence
+
+Released under the [MIT Licence](LICENSE).

@@ -7,7 +7,6 @@ import com.zukotuutori.mavenassist.model.Dependency;
 import com.zukotuutori.mavenassist.services.AutoUpdateService;
 import com.zukotuutori.mavenassist.services.DependencyManagerService;
 import com.zukotuutori.mavenassist.services.UiCustomizationService;
-import com.zukotuutori.mavenassist.services.UiCustomizationService.ButtonId;
 import com.zukotuutori.mavenassist.util.Notifier;
 import com.intellij.icons.AllIcons;
 import com.intellij.openapi.application.ApplicationManager;
@@ -48,7 +47,6 @@ import java.awt.event.MouseEvent;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -111,11 +109,6 @@ public class DependencyTablePanel extends JPanel {
 
     private final JBTable table;
 
-    /**
-     * Actions for every movable button — filled by {@link #registerSharedActions} and shared
-     * with the directory bar and the details dialog, since buttons can be placed anywhere.
-     */
-    private Map<ButtonId, Runnable> sharedActions = new EnumMap<>(ButtonId.class);
 
     /** The dependency fields currently shown as columns (details button column excluded). */
     private List<UiCustomizationService.Field> tableFields;
@@ -175,23 +168,8 @@ public class DependencyTablePanel extends JPanel {
         add(new SectionBox("Dependencies", AllIcons.Nodes.PpLib, tableWrap), BorderLayout.CENTER);
 
         configureTableColumns();
-        registerSharedActions(new EnumMap<>(ButtonId.class));
     }
 
-    /**
-     * Adds this panel's actions to the given map and uses the combined map for the
-     * top bar and the details dialog.
-     */
-    public void registerSharedActions(@NotNull Map<ButtonId, Runnable> actions) {
-        // These normally live in the details dialog; in the main window they act on the selected row.
-        actions.put(ButtonId.UPDATE_NEWEST, this::updateSelectedToNewest);
-        actions.put(ButtonId.CHANGE_VERSION, this::changeVersionOfSelected);
-        this.sharedActions = actions;
-    }
-
-    public @NotNull Map<ButtonId, Runnable> getSharedActions() {
-        return sharedActions;
-    }
 
     public void setPomFile(@NotNull File pomFile) {
         this.pomFile = pomFile;
@@ -555,31 +533,6 @@ public class DependencyTablePanel extends JPanel {
     // ------------------------------------------------ details-dialog actions in the main window
 
     /** The dependency selected in the table, or null (with a hint) if there is no selection. */
-    private @Nullable Row selectedRow() {
-        int viewRow = table.getSelectedRow();
-        if (viewRow < 0) {
-            Notifier.warn(project, "Select a dependency in the table first.");
-            return null;
-        }
-        int modelRow = table.convertRowIndexToModel(viewRow);
-        return modelRow >= 0 && modelRow < visibleRows.size() ? visibleRows.get(modelRow) : null;
-    }
-
-    /** "Update to Newest Version" placed in the main window: updates the selected dependency. */
-    private void updateSelectedToNewest() {
-        Row row = selectedRow();
-        if (row != null) {
-            updateRowToNewest(row);
-        }
-    }
-
-    /** "Change Version..." placed in the main window: asks for a version for the selected dependency. */
-    private void changeVersionOfSelected() {
-        Row row = selectedRow();
-        if (row != null) {
-            changeVersionOfRow(row);
-        }
-    }
 
     private void updateRowToNewest(@NotNull Row row) {
         Dependency dep = row.dependency;
@@ -670,7 +623,7 @@ public class DependencyTablePanel extends JPanel {
                     row.latest = latest;
                     latestCache.put(row.dependency.getKey(), latest);
                     model.fireTableRowsUpdated(rowIndex, rowIndex);
-                }, sharedActions).show();
+                }).show();
         // The dialog may have toggled the auto-update flag.
         model.fireTableRowsUpdated(rowIndex, rowIndex);
     }
@@ -1083,7 +1036,7 @@ public class DependencyTablePanel extends JPanel {
             }
             int fieldIndex = fieldIndexOf(columnIndex);
             if (fieldIndex >= tableFields.size()) {
-                return UiCustomizationService.getInstance().getButtonText(ButtonId.SHOW_DETAILS);
+                return "Details";
             }
             return switch (tableFields.get(fieldIndex)) {
                 case NAME -> row.displayName();
@@ -1126,7 +1079,7 @@ public class DependencyTablePanel extends JPanel {
 
     private static class DetailsButtonRenderer extends JButton implements TableCellRenderer {
         DetailsButtonRenderer() {
-            UiCustomizationService.getInstance().applyTo(ButtonId.SHOW_DETAILS, this);
+            super("Details");
         }
 
         @Override
@@ -1141,7 +1094,7 @@ public class DependencyTablePanel extends JPanel {
         private int editedRow = -1;
 
         DetailsButtonEditor() {
-            UiCustomizationService.getInstance().applyTo(ButtonId.SHOW_DETAILS, button);
+            button.setText("Details");
             button.addActionListener(e -> {
                 int row = editedRow;
                 fireEditingStopped();

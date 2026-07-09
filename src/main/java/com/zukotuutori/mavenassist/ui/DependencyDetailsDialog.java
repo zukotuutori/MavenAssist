@@ -4,7 +4,6 @@ import com.zukotuutori.mavenassist.maven.MavenCentralClient;
 import com.zukotuutori.mavenassist.model.Dependency;
 import com.zukotuutori.mavenassist.services.AutoUpdateService;
 import com.zukotuutori.mavenassist.services.UiCustomizationService;
-import com.zukotuutori.mavenassist.services.UiCustomizationService.ButtonId;
 import com.zukotuutori.mavenassist.services.UiCustomizationService.Field;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.project.Project;
@@ -38,16 +37,9 @@ public class DependencyDetailsDialog extends DialogWrapper {
     private final Consumer<String> latestVersionCache;
 
     private final JBLabel newestLabel = new JBLabel("fetching...");
-    private final JButton updateButton = new JButton();
-    private final JButton changeVersionButton = new JButton();
+    private final JButton updateButton = new JButton("Update to Newest Version");
+    private final JButton changeVersionButton = new JButton("Change Version...");
     private final JPanel buttonsStack = new JPanel();
-    private final java.util.Map<ButtonId, Runnable> externalActions;
-    /** Refreshes the buttons after a saved customization; ignores the customize window's live preview. */
-    private final Runnable customizationListener = () -> {
-        if (!UiCustomizationService.getInstance().isEditMode()) {
-            rebuildActionButtons();
-        }
-    };
 
     private @Nullable String newestVersion;
 
@@ -55,21 +47,18 @@ public class DependencyDetailsDialog extends DialogWrapper {
      * @param cachedLatest       already-known newest version, or null/blank/"?" to fetch it now
      * @param versionApplier     writes the given version into the pom and builds
      * @param latestVersionCache receives the newest version once fetched (for table caching)
-     * @param externalActions    actions for main-window buttons the user moved into this dialog
      */
     public DependencyDetailsDialog(@Nullable Project project,
                                    @NotNull Dependency dependency,
                                    @Nullable String cachedLatest,
                                    @NotNull String pomPath,
                                    @NotNull BiConsumer<Dependency, String> versionApplier,
-                                   @NotNull Consumer<String> latestVersionCache,
-                                   @NotNull java.util.Map<ButtonId, Runnable> externalActions) {
+                                   @NotNull Consumer<String> latestVersionCache) {
         super(project, true);
         this.dependency = dependency;
         this.pomPath = pomPath;
         this.versionApplier = versionApplier;
         this.latestVersionCache = latestVersionCache;
-        this.externalActions = externalActions;
 
         setTitle("Dependency Details");
         setOKButtonText("Close");
@@ -143,8 +132,8 @@ public class DependencyDetailsDialog extends DialogWrapper {
         changeVersionButton.addActionListener(e -> changeVersion());
 
         buttonsStack.setLayout(new javax.swing.BoxLayout(buttonsStack, javax.swing.BoxLayout.Y_AXIS));
-        rebuildActionButtons();
-        custom.addChangeListener(customizationListener);
+        buttonsStack.add(updateButton);
+        buttonsStack.add(changeVersionButton);
         gbc.gridy = row;
         gbc.gridx = 0;
         gbc.gridwidth = 2;
@@ -153,38 +142,7 @@ public class DependencyDetailsDialog extends DialogWrapper {
         return panel;
     }
 
-    /** (Re-)builds the stack with whatever buttons the user placed in this dialog. */
-    private void rebuildActionButtons() {
-        UiCustomizationService custom = UiCustomizationService.getInstance();
-        buttonsStack.removeAll();
-        for (ButtonId id : custom.buttonsIn(UiCustomizationService.Group.DETAILS_DIALOG)) {
-            JButton button;
-            if (id == ButtonId.UPDATE_NEWEST) {
-                button = updateButton;
-            } else if (id == ButtonId.CHANGE_VERSION) {
-                button = changeVersionButton;
-            } else {
-                // A main-window button moved in here — runs its usual action.
-                Runnable action = externalActions.get(id);
-                if (action == null) {
-                    continue;
-                }
-                button = new JButton();
-                button.addActionListener(e -> action.run());
-            }
-            UiCustomizationService.resetVisuals(button);
-            custom.applyTo(id, button);
-            buttonsStack.add(UiEditSupport.wrap(button, true));
-        }
-        buttonsStack.revalidate();
-        buttonsStack.repaint();
-    }
 
-    @Override
-    protected void dispose() {
-        UiCustomizationService.getInstance().removeChangeListener(customizationListener);
-        super.dispose();
-    }
 
     private void addRow(@NotNull JPanel panel, @NotNull GridBagConstraints gbc, int row,
                         @NotNull String label, @NotNull String value) {
