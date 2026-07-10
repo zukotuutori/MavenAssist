@@ -78,13 +78,8 @@ public final class DependencyManagerService implements PersistentStateComponent<
      * A default is hidden when it was deleted or a custom entry took over its name.
      */
     public @NotNull List<Dependency> getAllDependencies() {
-        Set<String> customNames = new HashSet<>();
+        Set<String> customNames = customNames();
         List<Dependency> result = new ArrayList<>();
-        for (Entry entry : state.customEntries) {
-            if (isValid(entry)) {
-                customNames.add(entry.name.trim().toLowerCase(Locale.ROOT));
-            }
-        }
         for (Dependency d : DEFAULTS) {
             if (!state.removedKeys.contains(d.getKey())
                     && !customNames.contains(d.getName().toLowerCase(Locale.ROOT))) {
@@ -100,9 +95,41 @@ public final class DependencyManagerService implements PersistentStateComponent<
         return result;
     }
 
+    private @NotNull Set<String> customNames() {
+        Set<String> names = new HashSet<>();
+        for (Entry entry : state.customEntries) {
+            if (isValid(entry)) {
+                names.add(entry.name.trim().toLowerCase(Locale.ROOT));
+            }
+        }
+        return names;
+    }
+
     private static boolean isValid(@NotNull Entry entry) {
         return entry.groupId != null && !entry.groupId.isBlank()
                 && entry.artifactId != null && !entry.artifactId.isBlank();
+    }
+
+    /**
+     * Un-hides every deleted built-in default; custom entries are untouched, and a default
+     * whose name a custom entry took over stays hidden. Returns how many came back.
+     */
+    public int restoreDefaults() {
+        int before = visibleDefaultCount();
+        state.removedKeys.clear();
+        return visibleDefaultCount() - before;
+    }
+
+    private int visibleDefaultCount() {
+        Set<String> customNames = customNames();
+        int count = 0;
+        for (Dependency d : DEFAULTS) {
+            if (!state.removedKeys.contains(d.getKey())
+                    && !customNames.contains(d.getName().toLowerCase(Locale.ROOT))) {
+                count++;
+            }
+        }
+        return count;
     }
 
     /** True if a visible manager entry already uses this display name (names are unique). */
