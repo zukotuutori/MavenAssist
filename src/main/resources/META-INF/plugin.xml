@@ -43,8 +43,6 @@
             <li><b>Tick</b> the dependencies you want. Search to narrow the list, then use <i>Select All</i>
                 to take everything the search turned up. Each row shows just the name; <i>Details</i> reveals
                 the coordinates and the newest version.</li>
-            <li>Leave <i>Always use the newest version</i> checked and every dependency is written with its
-                latest release from Maven Central.</li>
             <li>Press <b>Create pom.xml</b>. The view switches straight to the dependency table.</li>
         </ul>
 
