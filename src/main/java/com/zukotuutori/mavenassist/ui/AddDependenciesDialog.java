@@ -72,9 +72,9 @@ public class AddDependenciesDialog extends DialogWrapper {
     private final Action addToManagerAction = new AbstractAction("Add Own to Manager...") {
         @Override
         public void actionPerformed(ActionEvent e) {
-            if (new AddToManagerDialog(project).showAndGet()) {
-                reloadPicker();
-            }
+            // Reload regardless of OK/Cancel: the dialog's restore button changes the catalog too.
+            new AddToManagerDialog(project).showAndGet();
+            reloadPicker();
         }
     };
 

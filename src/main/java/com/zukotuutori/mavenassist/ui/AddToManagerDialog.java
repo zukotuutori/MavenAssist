@@ -57,6 +57,24 @@ public class AddToManagerDialog extends DialogWrapper {
 
         textArea.setLineWrap(false);
         panel.add(new JBScrollPane(textArea), BorderLayout.CENTER);
+
+        // Same blue as "MVN Clean Install"; brings back deleted built-in catalog entries.
+        javax.swing.JButton restoreButton = new javax.swing.JButton("Restore Built-in Dependencies",
+                com.intellij.util.IconUtil.colorize(com.intellij.icons.AllIcons.Actions.Rollback,
+                        java.awt.Color.WHITE));
+        restoreButton.setToolTipText("Bring back every built-in dependency that was deleted from the manager");
+        restoreButton.putClientProperty("JButton.backgroundColor",
+                new com.intellij.ui.JBColor(new java.awt.Color(0x3574F0), new java.awt.Color(0x3574F0)));
+        restoreButton.setForeground(java.awt.Color.WHITE);
+        restoreButton.addActionListener(e -> {
+            int restored = DependencyManagerService.getInstance().restoreDefaults();
+            Notifier.info(project, restored > 0
+                    ? "Restored " + restored + " built-in dependencies."
+                    : "All built-in dependencies are already in the manager.");
+        });
+        JPanel south = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
+        south.add(restoreButton);
+        panel.add(south, BorderLayout.SOUTH);
         return panel;
     }
 

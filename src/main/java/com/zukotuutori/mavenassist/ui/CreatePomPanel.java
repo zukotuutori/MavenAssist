@@ -172,29 +172,11 @@ public class CreatePomPanel extends JPanel {
 
         JButton addToManagerButton = new JButton("Add Dependencies to Manager");
         addToManagerButton.addActionListener(e -> {
-            AddToManagerDialog dialog = new AddToManagerDialog(project);
-            if (dialog.showAndGet()) {
-                reloadDependencyList();
-            }
+            // Reload regardless of OK/Cancel: the dialog's restore button changes the catalog too.
+            new AddToManagerDialog(project).showAndGet();
+            reloadDependencyList();
         });
         panel.add(addToManagerButton);
-
-        // Same blue as "MVN Clean Install"; brings back deleted built-in catalog entries.
-        JButton restoreButton = new JButton("Restore Built-in Dependencies",
-                com.intellij.util.IconUtil.colorize(com.intellij.icons.AllIcons.Actions.Rollback,
-                        java.awt.Color.WHITE));
-        restoreButton.setToolTipText("Bring back every built-in dependency that was deleted from the manager");
-        restoreButton.putClientProperty("JButton.backgroundColor",
-                new com.intellij.ui.JBColor(new java.awt.Color(0x3574F0), new java.awt.Color(0x3574F0)));
-        restoreButton.setForeground(java.awt.Color.WHITE);
-        restoreButton.addActionListener(e -> {
-            int restored = DependencyManagerService.getInstance().restoreDefaults();
-            reloadDependencyList();
-            Notifier.info(project, restored > 0
-                    ? "Restored " + restored + " built-in dependencies."
-                    : "All built-in dependencies are already in the manager.");
-        });
-        panel.add(restoreButton);
 
         JButton createButton = new JButton("Create pom.xml");
         createButton.addActionListener(e -> createPom());
