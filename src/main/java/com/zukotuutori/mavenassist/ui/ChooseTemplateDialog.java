@@ -68,6 +68,10 @@ class ChooseTemplateDialog extends DialogWrapper {
         JButton createButton = new JButton("Create Template...");
         createButton.addActionListener(e -> createTemplate());
         buttons.add(createButton);
+        JButton editButton = new JButton("Edit...");
+        editButton.setToolTipText("Change the selected template");
+        editButton.addActionListener(e -> editSelected());
+        buttons.add(editButton);
         // Same red pill as the delete buttons in the dependency table.
         JButton deleteButton = new JButton("Delete", TablePills.TRASH_WHITE);
         deleteButton.putClientProperty("JButton.backgroundColor", TablePills.DELETE);
@@ -94,6 +98,24 @@ class ChooseTemplateDialog extends DialogWrapper {
             Template created = dialog.getTemplate();
             PomTemplateService.getInstance().save(created);
             reload(created.name);
+        }
+    }
+
+    /** Opens the template form prefilled; saving replaces the template (renames included). */
+    private void editSelected() {
+        Template selected = list.getSelectedValue();
+        if (selected == null) {
+            return;
+        }
+        CreateTemplateDialog dialog = new CreateTemplateDialog(project, selected);
+        if (dialog.showAndGet()) {
+            Template updated = dialog.getTemplate();
+            PomTemplateService service = PomTemplateService.getInstance();
+            if (!updated.name.equalsIgnoreCase(selected.name)) {
+                service.remove(selected.name);
+            }
+            service.save(updated);
+            reload(updated.name);
         }
     }
 

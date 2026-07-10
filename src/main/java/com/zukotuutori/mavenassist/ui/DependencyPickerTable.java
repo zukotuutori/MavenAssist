@@ -48,6 +48,7 @@ class DependencyPickerTable extends JBTable {
     /** -1 when the version column is disabled. */
     private final int colVersion;
     private final int colDetails;
+    /** -1 when the delete column is disabled (e.g. in the template dialog). */
     private final int colDelete;
 
     private final List<Dependency> all = new ArrayList<>();
@@ -61,14 +62,19 @@ class DependencyPickerTable extends JBTable {
     private String query = "";
 
     DependencyPickerTable(@NotNull Consumer<Dependency> detailsHandler) {
-        this(detailsHandler, false);
+        this(detailsHandler, false, true);
     }
 
     DependencyPickerTable(@NotNull Consumer<Dependency> detailsHandler, boolean withVersionColumn) {
+        this(detailsHandler, withVersionColumn, true);
+    }
+
+    DependencyPickerTable(@NotNull Consumer<Dependency> detailsHandler,
+                          boolean withVersionColumn, boolean withDeleteColumn) {
         this.detailsHandler = detailsHandler;
         this.colVersion = withVersionColumn ? 2 : -1;
         this.colDetails = withVersionColumn ? 3 : 2;
-        this.colDelete = withVersionColumn ? 4 : 3;
+        this.colDelete = withDeleteColumn ? colDetails + 1 : -1;
         setModel(model);
         TablePills.modernize(this);
         getTableHeader().setReorderingAllowed(false);
@@ -84,21 +90,23 @@ class DependencyPickerTable extends JBTable {
         getColumnModel().getColumn(colDetails).setCellEditor(new DetailsButtonEditor());
         getColumnModel().getColumn(colDetails)
                 .setMaxWidth(Math.max(JBUI.scale(120), renderer.getPreferredSize().width + JBUI.scale(8)));
-        getColumnModel().getColumn(colDelete).setCellRenderer(
-                new TablePills.DeleteRenderer("Delete this dependency from the manager (all projects)"));
-        getColumnModel().getColumn(colDelete).setMaxWidth(JBUI.scale(44));
+        if (withDeleteColumn) {
+            getColumnModel().getColumn(colDelete).setCellRenderer(
+                    new TablePills.DeleteRenderer("Delete this dependency from the manager (all projects)"));
+            getColumnModel().getColumn(colDelete).setMaxWidth(JBUI.scale(44));
 
-        // Click on the trash cell deletes the dependency from the manager (after confirmation).
-        addMouseListener(new MouseAdapter() {
-            @Override
-            public void mouseClicked(MouseEvent e) {
-                int row = rowAtPoint(e.getPoint());
-                int column = columnAtPoint(e.getPoint());
-                if (row >= 0 && column >= 0 && convertColumnIndexToModel(column) == colDelete) {
-                    confirmAndDeleteFromManager(convertRowIndexToModel(row));
+            // Click on the trash cell deletes the dependency from the manager (after confirmation).
+            addMouseListener(new MouseAdapter() {
+                @Override
+                public void mouseClicked(MouseEvent e) {
+                    int row = rowAtPoint(e.getPoint());
+                    int column = columnAtPoint(e.getPoint());
+                    if (row >= 0 && column >= 0 && convertColumnIndexToModel(column) == colDelete) {
+                        confirmAndDeleteFromManager(convertRowIndexToModel(row));
+                    }
                 }
-            }
-        });
+            });
+        }
     }
 
     private void confirmAndDeleteFromManager(int modelRow) {
@@ -277,7 +285,7 @@ class DependencyPickerTable extends JBTable {
 
         @Override
         public int getColumnCount() {
-            return colDelete + 1;
+            return (colDelete >= 0 ? colDelete : colDetails) + 1;
         }
 
         @Override

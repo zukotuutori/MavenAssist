@@ -47,16 +47,39 @@ class CreateTemplateDialog extends DialogWrapper {
     private final JBCheckBox newestVersionsCheck =
             new JBCheckBox("Always use the newest version of each dependency (from Maven Central)", true);
     private final SearchTextField searchField = new SearchTextField();
-    private final DependencyPickerTable picker = new DependencyPickerTable(this::showDependencyDetails);
+    // No delete column: removing catalog entries is out of place while composing a template.
+    private final DependencyPickerTable picker =
+            new DependencyPickerTable(this::showDependencyDetails, false, false);
+    /** The template being edited, or null when creating a new one. */
+    private final PomTemplateService.@Nullable Template editing;
 
     CreateTemplateDialog(@NotNull Project project) {
+        this(project, null);
+    }
+
+    CreateTemplateDialog(@NotNull Project project, PomTemplateService.@Nullable Template editing) {
         super(project);
         this.project = project;
-        setTitle("Create Template");
+        this.editing = editing;
+        setTitle(editing == null ? "Create Template" : "Edit Template");
         setOKButtonText("Save Template");
         init();
         picker.setDependencies(DependencyManagerService.getInstance().getAllDependencies());
         picker.bindSearch(searchField);
+        if (editing != null) {
+            nameField.setText(editing.name);
+            groupIdField.setText(editing.groupId);
+            artifactIdField.setText(editing.artifactId);
+            versionField.setText(editing.version);
+            parentPomField.setText(editing.parentPomPath == null ? "" : editing.parentPomPath);
+            newestVersionsCheck.setSelected(editing.useNewestVersions);
+            for (String gav : editing.dependencies) {
+                Dependency d = Dependency.fromGav(gav);
+                if (d != null) {
+                    picker.setChecked(d.getKey(), true);
+                }
+            }
+        }
     }
 
     @Override
@@ -150,7 +173,8 @@ class CreateTemplateDialog extends DialogWrapper {
         if (name.isEmpty()) {
             return new ValidationInfo("Give the template a name.", nameField);
         }
-        if (PomTemplateService.getInstance().exists(name)) {
+        boolean keepingOwnName = editing != null && name.equalsIgnoreCase(editing.name);
+        if (!keepingOwnName && PomTemplateService.getInstance().exists(name)) {
             return new ValidationInfo("A template named \"" + name + "\" already exists.", nameField);
         }
         if (groupIdField.getText().trim().isEmpty()) {
