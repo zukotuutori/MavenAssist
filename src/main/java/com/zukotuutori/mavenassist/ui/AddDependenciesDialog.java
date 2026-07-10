@@ -181,10 +181,44 @@ public class AddDependenciesDialog extends DialogWrapper {
             showConfigureStep();
             return;
         }
+        RowConfig offender = firstNonexistentPinnedVersion();
+        if (offender != null) {
+            setErrorText(VersionInput.NOT_FOUND, offender.versionField);
+            return;
+        }
+        setErrorText(null);
         super.doOKAction();
     }
 
+    /**
+     * Checks every pinned "Specific version" against Maven Central; returns the first
+     * one Central does not know, or null when all exist (or the check could not run).
+     */
+    private @Nullable RowConfig firstNonexistentPinnedVersion() {
+        List<RowConfig> pinned = rowConfigs.values().stream().filter(RowConfig::hasFixedVersion).toList();
+        if (pinned.isEmpty()) {
+            return null;
+        }
+        try {
+            return com.intellij.openapi.progress.ProgressManager.getInstance()
+                    .runProcessWithProgressSynchronously(() -> {
+                        for (RowConfig config : pinned) {
+                            com.intellij.openapi.progress.ProgressManager.checkCanceled();
+                            if (Boolean.FALSE.equals(MavenCentralClient.versionExists(
+                                    config.dependency.getGroupId(), config.dependency.getArtifactId(),
+                                    config.fixedVersion()))) {
+                                return config;
+                            }
+                        }
+                        return null;
+                    }, "Checking versions on Maven Central...", true, project);
+        } catch (com.intellij.openapi.progress.ProcessCanceledException e) {
+            return null; // could not verify — do not block the user
+        }
+    }
+
     private void showPickStep() {
+        setErrorText(null);
         onConfigureStep = false;
         setTitle("Add Dependencies (1/2): Pick");
         setOKButtonText("Next");
@@ -275,16 +309,17 @@ public class AddDependenciesDialog extends DialogWrapper {
 
     private void changeVersion(@NotNull Dependency dependency) {
         String current = versionOverrides.getOrDefault(dependency.getKey(), dependency.getVersion());
-        String input = Messages.showInputDialog(picker,
+        String input = VersionInput.ask(project, picker,
+                dependency.getGroupId(), dependency.getArtifactId(),
                 "Custom version for " + dependency.getKey() + "\n(leave empty to use the newest version again):",
-                "Change Version", null, current, null);
+                current);
         if (input == null) {
             return; // cancelled
         }
-        if (input.trim().isEmpty()) {
+        if (input.isEmpty()) {
             versionOverrides.remove(dependency.getKey());
         } else {
-            versionOverrides.put(dependency.getKey(), input.trim());
+            versionOverrides.put(dependency.getKey(), input);
             picker.setChecked(dependency.getKey(), true); // picking a version implies you want the dependency
         }
         rowConfigs.remove(dependency.getKey()); // rebuilt from the new pin on the next step change

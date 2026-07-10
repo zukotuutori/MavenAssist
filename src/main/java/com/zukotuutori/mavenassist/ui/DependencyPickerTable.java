@@ -256,16 +256,17 @@ class DependencyPickerTable extends JBTable {
         menu.add(newest);
         JMenuItem custom = new JMenuItem("Custom version...");
         custom.addActionListener(e -> {
-            String input = Messages.showInputDialog(this,
+            String input = VersionInput.ask(null, this,
+                    d.getGroupId(), d.getArtifactId(),
                     "Custom version for " + d.getKey() + ":\n(leave empty to use the newest version)",
-                    "Custom Version", null, customVersions.get(d.getKey()), null);
+                    customVersions.get(d.getKey()));
             if (input == null) {
                 return; // cancelled
             }
-            if (input.trim().isEmpty()) {
+            if (input.isEmpty()) {
                 clearCustomVersion(d.getKey());
             } else {
-                setCustomVersion(d.getKey(), input.trim());
+                setCustomVersion(d.getKey(), input);
             }
         });
         menu.add(custom);

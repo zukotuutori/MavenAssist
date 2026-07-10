@@ -559,13 +559,13 @@ public class DependencyTablePanel extends JPanel {
     }
 
     private void changeVersionOfRow(@NotNull Row row) {
-        String input = com.intellij.openapi.ui.Messages.showInputDialog(this,
-                "Custom version for " + row.dependency.getKey() + ":",
-                "Change Version", null, row.dependency.getVersion(), null);
-        if (input == null || input.trim().isEmpty()) {
+        String input = VersionInput.ask(project, this,
+                row.dependency.getGroupId(), row.dependency.getArtifactId(),
+                "Custom version for " + row.dependency.getKey() + ":", row.dependency.getVersion());
+        if (input == null || input.isEmpty()) {
             return;
         }
-        applyVersion(row.dependency, input.trim());
+        applyVersion(row.dependency, input);
     }
 
     /** The "newest / custom version" menu of a row's Update button. */

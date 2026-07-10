@@ -181,13 +181,13 @@ public class DependencyDetailsDialog extends DialogWrapper {
     }
 
     private void changeVersion() {
-        String input = Messages.showInputDialog(getContentPanel(),
-                "Custom version for " + dependency.getKey() + ":",
-                "Change Version", null, dependency.getVersion(), null);
-        if (input == null || input.trim().isEmpty()) {
+        String input = VersionInput.ask(null, getContentPanel(),
+                dependency.getGroupId(), dependency.getArtifactId(),
+                "Custom version for " + dependency.getKey() + ":", dependency.getVersion());
+        if (input == null || input.isEmpty()) {
             return;
         }
-        versionApplier.accept(dependency, input.trim());
+        versionApplier.accept(dependency, input);
         close(OK_EXIT_CODE);
     }
 }
