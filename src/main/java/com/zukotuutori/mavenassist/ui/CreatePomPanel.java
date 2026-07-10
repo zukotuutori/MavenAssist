@@ -173,7 +173,13 @@ public class CreatePomPanel extends JPanel {
         });
         panel.add(addToManagerButton);
 
-        JButton createButton = new JButton("Create pom.xml");
+        // Same blue as "MVN Clean Install"; the "new file" icon marks the primary action.
+        JButton createButton = new JButton("Create pom.xml",
+                com.intellij.util.IconUtil.colorize(com.intellij.icons.AllIcons.Actions.AddFile,
+                        java.awt.Color.WHITE));
+        createButton.putClientProperty("JButton.backgroundColor",
+                new com.intellij.ui.JBColor(new java.awt.Color(0x3574F0), new java.awt.Color(0x3574F0)));
+        createButton.setForeground(java.awt.Color.WHITE);
         createButton.addActionListener(e -> createPom());
         panel.add(createButton);
 

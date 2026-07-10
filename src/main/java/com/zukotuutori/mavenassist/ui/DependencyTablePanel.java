@@ -415,12 +415,8 @@ public class DependencyTablePanel extends JPanel {
         openParentButton.addActionListener(e -> openInEditor(parentPomFile));
         openParentButton.setVisible(false);
         parentActionButton.addActionListener(e -> addParentPom());
-        // Same blue as "MVN Clean Install"; the hierarchy icon points up to the parent.
-        parentActionButton.setIcon(com.intellij.util.IconUtil.colorize(
-                com.intellij.icons.AllIcons.Hierarchy.Supertypes, java.awt.Color.WHITE));
-        parentActionButton.putClientProperty("JButton.backgroundColor",
-                new com.intellij.ui.JBColor(new java.awt.Color(0x3574F0), new java.awt.Color(0x3574F0)));
-        parentActionButton.setForeground(java.awt.Color.WHITE);
+        // Normal button colors; the hierarchy icon points up to the parent.
+        parentActionButton.setIcon(com.intellij.icons.AllIcons.Hierarchy.Supertypes);
         pomLabel.setForeground(com.intellij.util.ui.UIUtil.getContextHelpForeground());
 
         JPanel header = new JPanel(new java.awt.GridLayout(0, 1, 0, JBUI.scale(2)));
