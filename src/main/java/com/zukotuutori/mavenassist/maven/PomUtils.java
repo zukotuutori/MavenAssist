@@ -546,6 +546,13 @@ public final class PomUtils {
         try {
             DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
             factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
+            // Forbid DOCTYPE entirely: a real pom never has one, and this closes XXE and
+            // entity-expansion ("billion laughs") for good, independent of the JDK defaults.
+            factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+            factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
+            factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+            factory.setXIncludeAware(false);
+            factory.setExpandEntityReferences(false);
             factory.setNamespaceAware(false);
             Document doc = factory.newDocumentBuilder().parse(pomFile);
             return doc.getDocumentElement();

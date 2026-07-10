@@ -29,6 +29,10 @@ public final class MavenBuildRunner {
     private static final int TIMEOUT_MS = 10 * 60 * 1000;
     /** Version downloaded from apache.org when no package manager is available. */
     private static final String MAVEN_VERSION = "3.9.11";
+    /** Official Apache SHA-512 of apache-maven-3.9.11-bin.zip; the download is rejected on mismatch. */
+    private static final String MAVEN_SHA512 =
+            "03e2d65d4483a3396980629f260e25cac0d8b6f7f2791e4dc20bc83f9514db8d0"
+            + "f05b0479e699a5f34679250c49c8e52e961262ded468a20de0be254d8207076";
 
     private MavenBuildRunner() {
     }
@@ -166,6 +170,14 @@ public final class MavenBuildRunner {
             throw lastFailure != null ? lastFailure : new IOException("Download failed.");
         }
 
+        indicator.setText("Verifying download...");
+        String actual = sha512(tempZip);
+        if (!MAVEN_SHA512.equalsIgnoreCase(actual)) {
+            Files.deleteIfExists(tempZip);
+            throw new IOException("Downloaded Maven failed its checksum check and was discarded "
+                    + "(expected " + MAVEN_SHA512 + ", got " + actual + "). Nothing was installed.");
+        }
+
         indicator.setText("Unpacking Maven...");
         Path base = baseDir.toPath();
         Files.createDirectories(base);
@@ -193,6 +205,27 @@ public final class MavenBuildRunner {
         if (!SystemInfo.isWindows) {
             //noinspection ResultOfMethodCallIgnored
             mvn.setExecutable(true);
+        }
+    }
+
+    /** Lowercase hex SHA-512 of the file. */
+    private static @NotNull String sha512(@NotNull Path file) throws IOException {
+        try {
+            java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-512");
+            try (InputStream in = Files.newInputStream(file)) {
+                byte[] buffer = new byte[8192];
+                int read;
+                while ((read = in.read(buffer)) != -1) {
+                    digest.update(buffer, 0, read);
+                }
+            }
+            StringBuilder hex = new StringBuilder();
+            for (byte b : digest.digest()) {
+                hex.append(Character.forDigit((b >> 4) & 0xF, 16)).append(Character.forDigit(b & 0xF, 16));
+            }
+            return hex.toString();
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IOException("SHA-512 unavailable", e);
         }
     }
 
