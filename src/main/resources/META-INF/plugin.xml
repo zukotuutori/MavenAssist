@@ -5,6 +5,16 @@
 
     <description><![CDATA[
         <p><b>Your friendly co-pilot for <code>pom.xml</code> files.</b> Maven Assist looks at the directory
+        <ul>
+            <li><b>Create pom.xml's insanely easy</b></li>
+            <li><b>Add, delete and manage dependencies with only a few clicks</b></li>
+            <li><b>Quickly create templates and reuse them in other projects</b></li>
+            <li><b>and many features more...</b></li>
+        </ul>
+
+
+
+
         you point it at and gives you exactly the right tools for what it finds: create a brand-new pom.xml in
         seconds, or inspect and update an existing one with one-click version upgrades straight from
         Maven Central.</p>
