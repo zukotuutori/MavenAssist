@@ -17,7 +17,6 @@ import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.ui.SearchTextField;
-import com.intellij.ui.components.JBCheckBox;
 import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBScrollPane;
 import com.intellij.util.ui.JBUI;
@@ -53,8 +52,6 @@ public class CreatePomPanel extends JPanel {
     private final JTextField artifactIdField = new JTextField("my-app");
     private final JTextField versionField = new JTextField("1.0.0");
     private final JTextField parentPomField = new JTextField();
-    private final JBCheckBox newestVersionsCheck = new JBCheckBox(
-            "Install every dependency with the newest version (unless a custom version is chosen)", true);
     private final SearchTextField dependencySearchField = new SearchTextField();
     private final DependencyPickerTable dependencyPicker =
             new DependencyPickerTable(this::showDependencyDetails, true);
@@ -92,7 +89,7 @@ public class CreatePomPanel extends JPanel {
 
         form.setOpaque(false);
         int row = 0;
-        addFormRow(form, gbc, row++, "No pom.xml found in this directory — create one:", null);
+        addFormRow(form, gbc, row++, "No pom.xml found in this directory: Create one:", null);
         addFormRow(form, gbc, row++, "Group id:", groupIdField);
         addFormRow(form, gbc, row++, "Artifact id:", artifactIdField);
         addFormRow(form, gbc, row++, "Version:", versionField);
@@ -158,8 +155,6 @@ public class CreatePomPanel extends JPanel {
 
         panel.add(header, BorderLayout.NORTH);
         panel.add(new JBScrollPane(dependencyPicker), BorderLayout.CENTER);
-        newestVersionsCheck.setOpaque(false);
-        panel.add(newestVersionsCheck, BorderLayout.SOUTH);
         dependencyPicker.bindSearch(dependencySearchField);
         return panel;
     }
@@ -218,7 +213,6 @@ public class CreatePomPanel extends JPanel {
         artifactIdField.setText(template.artifactId);
         versionField.setText(template.version);
         parentPomField.setText(template.parentPomPath == null ? "" : template.parentPomPath);
-        newestVersionsCheck.setSelected(template.useNewestVersions);
 
         reloadDependencyList();
         dependencyPicker.checkNone();
@@ -311,7 +305,6 @@ public class CreatePomPanel extends JPanel {
         }
 
         List<Dependency> selected = getSelectedDependencies();
-        boolean useNewest = newestVersionsCheck.isSelected();
         Map<String, String> customVersions = dependencyPicker.getCustomVersions();
         File pomFile = new File(directory, "pom.xml");
 
@@ -328,18 +321,13 @@ public class CreatePomPanel extends JPanel {
                     List<Dependency> resolved = new ArrayList<>();
                     for (Dependency dep : selected) {
                         indicator.checkCanceled();
-                        // A pinned version always wins; otherwise the checkbox decides
-                        // between the newest release and the catalog version.
+                        // A pinned version always wins; otherwise the newest release is used
+                        // (falling back to the catalog version if Central is unreachable).
                         String depVersion = customVersions.get(dep.getKey());
                         if (depVersion == null) {
-                            depVersion = dep.getVersion();
-                            if (useNewest) {
-                                indicator.setText("Fetching newest version of " + dep.getKey() + "...");
-                                String latest = MavenCentralClient.getLatestVersion(dep.getGroupId(), dep.getArtifactId());
-                                if (latest != null) {
-                                    depVersion = latest;
-                                }
-                            }
+                            indicator.setText("Fetching newest version of " + dep.getKey() + "...");
+                            String latest = MavenCentralClient.getLatestVersion(dep.getGroupId(), dep.getArtifactId());
+                            depVersion = latest != null ? latest : dep.getVersion();
                         }
                         resolved.add(dep.withVersion(depVersion));
                     }
