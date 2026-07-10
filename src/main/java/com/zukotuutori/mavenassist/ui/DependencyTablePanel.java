@@ -903,6 +903,10 @@ public class DependencyTablePanel extends JPanel {
             return;
         }
         try {
+            // Re-selecting the pom's current parent is a no-op: no rewrite, no dialog, no build.
+            if (PomUtils.parentAlreadySet(pomFile, parentFile)) {
+                return;
+            }
             if (!ensureParentPackaging(parentFile)) {
                 return;
             }

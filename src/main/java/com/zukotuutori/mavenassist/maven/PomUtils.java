@@ -120,6 +120,26 @@ public final class PomUtils {
         return candidate.isFile() ? candidate : null;
     }
 
+    /**
+     * True when the pom's &lt;parent&gt; already points at exactly this file and the
+     * declared coordinates still match the parent's — re-selecting it changes nothing.
+     */
+    public static boolean parentAlreadySet(@NotNull File pomFile, @NotNull File parentFile) throws IOException {
+        File current = readParentPomFile(pomFile);
+        if (current == null) {
+            return false;
+        }
+        if (!current.getCanonicalFile().equals(parentFile.getCanonicalFile())) {
+            return false;
+        }
+        PomInfo declared = readParentInfo(pomFile);
+        PomInfo actual = readPomInfo(parentFile);
+        return declared != null
+                && declared.groupId().equals(actual.groupId())
+                && declared.artifactId().equals(actual.artifactId())
+                && declared.version().equals(actual.version());
+    }
+
     /** The pom's own &lt;packaging&gt;, or "jar" (Maven's default) if the tag is absent. */
     public static @NotNull String readPackaging(@NotNull File pomFile) throws IOException {
         String packaging = childText(parse(pomFile), "packaging");
