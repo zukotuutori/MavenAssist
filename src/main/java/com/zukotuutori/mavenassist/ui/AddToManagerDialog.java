@@ -23,7 +23,7 @@ import java.util.List;
 
 /**
  * Dialog to permanently add dependencies to the manager: enter a display name and
- * paste the dependency code — one or more &lt;dependency&gt; XML blocks or plain
+ * paste the dependency code as one or more &lt;dependency&gt; XML blocks or plain
  * "groupId:artifactId:version" lines.
  */
 public class AddToManagerDialog extends DialogWrapper {
@@ -50,7 +50,7 @@ public class AddToManagerDialog extends DialogWrapper {
         nameRow.add(new JBLabel("Name:"), BorderLayout.WEST);
         nameRow.add(nameField, BorderLayout.CENTER);
         north.add(nameRow, BorderLayout.NORTH);
-        north.add(new JBLabel("<html>Dependency code — one or more <b>&lt;dependency&gt;</b> XML blocks<br/>"
+        north.add(new JBLabel("<html>Dependency code: one or more <b>&lt;dependency&gt;</b> XML blocks<br/>"
                 + "(as shown on mvnrepository.com) or plain <b>groupId:artifactId[:version]</b> lines:</html>"),
                 BorderLayout.SOUTH);
         panel.add(north, BorderLayout.NORTH);
@@ -58,14 +58,12 @@ public class AddToManagerDialog extends DialogWrapper {
         textArea.setLineWrap(false);
         panel.add(new JBScrollPane(textArea), BorderLayout.CENTER);
 
-        // Same blue as "MVN Clean Install"; brings back deleted built-in catalog entries.
+        // Same accent as "MVN Clean Install"; brings back deleted built-in catalog entries.
         javax.swing.JButton restoreButton = new javax.swing.JButton("Restore Built-in Dependencies",
                 com.intellij.util.IconUtil.colorize(com.intellij.icons.AllIcons.Actions.Rollback,
                         java.awt.Color.WHITE));
         restoreButton.setToolTipText("Bring back every built-in dependency that was deleted from the manager");
-        restoreButton.putClientProperty("JButton.backgroundColor",
-                new com.intellij.ui.JBColor(new java.awt.Color(0x3574F0), new java.awt.Color(0x3574F0)));
-        restoreButton.setForeground(java.awt.Color.WHITE);
+        Theme.applyAccent(restoreButton);
         restoreButton.addActionListener(e -> {
             int restored = DependencyManagerService.getInstance().restoreDefaults();
             Notifier.info(project, restored > 0
@@ -117,7 +115,7 @@ public class AddToManagerDialog extends DialogWrapper {
             }
         }
         Notifier.info(project, "Added " + added + " dependencies to the manager"
-                + (skipped > 0 ? " (" + skipped + " skipped — name already used)" : "") + ".");
+                + (skipped > 0 ? " (" + skipped + " skipped because the name is already used)" : "") + ".");
         super.doOKAction();
     }
 }

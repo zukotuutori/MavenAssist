@@ -3,6 +3,7 @@ package com.zukotuutori.mavenassist.util;
 import com.intellij.notification.NotificationGroupManager;
 import com.intellij.notification.NotificationType;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.text.StringUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -26,9 +27,13 @@ public final class Notifier {
     }
 
     private static void notify(@Nullable Project project, @NotNull String message, @NotNull NotificationType type) {
+        String safeContent = StringUtil.escapeXmlEntities(StringUtil.convertLineSeparators(message))
+                .replace("\n", "<br>");
         NotificationGroupManager.getInstance()
                 .getNotificationGroup(GROUP_ID)
-                .createNotification("Maven Assist", message, type)
+                // Notification content supports HTML. Treat all project, POM and process
+                // strings as text so coordinates cannot inject markup or remote resources.
+                .createNotification("Maven Assist", safeContent, type)
                 .notify(project);
     }
 }

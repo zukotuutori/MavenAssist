@@ -2,6 +2,7 @@ package com.zukotuutori.mavenassist.services;
 
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.components.PersistentStateComponent;
+import com.intellij.openapi.components.RoamingType;
 import com.intellij.openapi.components.Service;
 import com.intellij.openapi.components.State;
 import com.intellij.openapi.components.Storage;
@@ -18,7 +19,8 @@ import java.util.List;
  * stored permanently at application level so they survive IDE restarts.
  */
 @Service
-@State(name = "MavenAssistPomTemplates", storages = @Storage("mavenAssistPomTemplates.xml"))
+@State(name = "MavenAssistPomTemplates",
+        storages = @Storage(value = "mavenAssistPomTemplates.xml", roamingType = RoamingType.DISABLED))
 public final class PomTemplateService implements PersistentStateComponent<PomTemplateService.State> {
 
     /** One persisted template. Public fields and a no-arg constructor: required for XML serialization. */

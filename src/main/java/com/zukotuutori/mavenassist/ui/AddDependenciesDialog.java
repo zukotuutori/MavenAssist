@@ -42,7 +42,7 @@ import java.util.Set;
  * Two-step dialog for adding dependencies from the manager.
  * Step 1: search bar + table showing only a checkbox, the dependency's <b>name</b> and a
  * <b>Show Details</b> button per row. Step 2 (after <i>Next</i>): one block per selected
- * dependency with its own "use newest version" / specific version / auto-update choices —
+ * dependency with its own "use newest version" / specific version / auto-update choices.
  * only <i>Add</i> on that step actually adds them.
  */
 public class AddDependenciesDialog extends DialogWrapper {
@@ -142,7 +142,7 @@ public class AddDependenciesDialog extends DialogWrapper {
         JPanel bulkRow = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, JBUI.scale(4), 0));
         JButton autoUpdateAllButton = new JButton("Enable Auto Update for All");
         autoUpdateAllButton.setToolTipText(
-                "Tick \"Auto update on every project save\" for every dependency in this list");
+                "Enable auto update for every dependency in this list");
         autoUpdateAllButton.addActionListener(e -> {
             for (RowConfig config : rowConfigs.values()) {
                 config.autoUpdateCheck.setSelected(true);
@@ -181,40 +181,8 @@ public class AddDependenciesDialog extends DialogWrapper {
             showConfigureStep();
             return;
         }
-        RowConfig offender = firstNonexistentPinnedVersion();
-        if (offender != null) {
-            setErrorText(VersionInput.NOT_FOUND, offender.versionField);
-            return;
-        }
         setErrorText(null);
         super.doOKAction();
-    }
-
-    /**
-     * Checks every pinned "Specific version" against Maven Central; returns the first
-     * one Central does not know, or null when all exist (or the check could not run).
-     */
-    private @Nullable RowConfig firstNonexistentPinnedVersion() {
-        List<RowConfig> pinned = rowConfigs.values().stream().filter(RowConfig::hasFixedVersion).toList();
-        if (pinned.isEmpty()) {
-            return null;
-        }
-        try {
-            return com.intellij.openapi.progress.ProgressManager.getInstance()
-                    .runProcessWithProgressSynchronously(() -> {
-                        for (RowConfig config : pinned) {
-                            com.intellij.openapi.progress.ProgressManager.checkCanceled();
-                            if (Boolean.FALSE.equals(MavenCentralClient.versionExists(
-                                    config.dependency.getGroupId(), config.dependency.getArtifactId(),
-                                    config.fixedVersion()))) {
-                                return config;
-                            }
-                        }
-                        return null;
-                    }, "Checking versions on Maven Central...", true, project);
-        } catch (com.intellij.openapi.progress.ProcessCanceledException e) {
-            return null; // could not verify — do not block the user
-        }
     }
 
     private void showPickStep() {
@@ -262,7 +230,7 @@ public class AddDependenciesDialog extends DialogWrapper {
                 new JBCheckBox("Use newest version (from Maven Central)", true);
         final JBTextField versionField = new JBTextField();
         final JBCheckBox autoUpdateCheck =
-                new JBCheckBox("Auto update: bump to the newest version on every project save", false);
+                new JBCheckBox("Auto update at the times selected under Customize", false);
         final JPanel panel;
 
         RowConfig(@NotNull Dependency dependency) {
@@ -339,7 +307,7 @@ public class AddDependenciesDialog extends DialogWrapper {
         return result;
     }
 
-    /** Keys with a specific version chosen in step 2 — never replaced by the newest one. */
+    /** Keys with a specific version chosen in step 2; never replaced by the newest one. */
     public @NotNull Set<String> getFixedVersionKeys() {
         Set<String> result = new HashSet<>();
         for (RowConfig config : rowConfigs.values()) {
@@ -350,7 +318,7 @@ public class AddDependenciesDialog extends DialogWrapper {
         return result;
     }
 
-    /** Keys flagged in step 2 for auto-update on every project save. */
+    /** Keys flagged in step 2 for auto-update at the configured trigger times. */
     public @NotNull Set<String> getAutoUpdateKeys() {
         Set<String> result = new HashSet<>();
         for (RowConfig config : rowConfigs.values()) {
@@ -434,7 +402,8 @@ public class AddDependenciesDialog extends DialogWrapper {
 
         private void updatePinnedLabel() {
             String pinned = versionOverrides.get(dependency.getKey());
-            pinnedLabel.setText(pinned == null ? "(none — newest version is used)" : pinned);
+            pinnedLabel.setText(UiText.html(
+                    pinned == null ? "(none; newest version is used)" : pinned));
         }
 
         private void addRow(@NotNull JPanel panel, @NotNull GridBagConstraints gbc, int row,
@@ -446,7 +415,7 @@ public class AddDependenciesDialog extends DialogWrapper {
             panel.add(new JBLabel(label), gbc);
             gbc.gridx = 1;
             gbc.weightx = 1;
-            JBLabel valueLabel = new JBLabel(value);
+            JBLabel valueLabel = new JBLabel(UiText.html(value));
             valueLabel.setFont(valueLabel.getFont().deriveFont(Font.BOLD));
             panel.add(valueLabel, gbc);
         }

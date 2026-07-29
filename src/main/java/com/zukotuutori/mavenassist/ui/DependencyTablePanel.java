@@ -3,8 +3,12 @@ package com.zukotuutori.mavenassist.ui;
 import com.zukotuutori.mavenassist.maven.MavenBuildRunner;
 import com.zukotuutori.mavenassist.maven.MavenCentralClient;
 import com.zukotuutori.mavenassist.maven.PomUtils;
+import com.zukotuutori.mavenassist.maven.PomWriteAction;
+import com.zukotuutori.mavenassist.maven.VersionPolicy;
 import com.zukotuutori.mavenassist.model.Dependency;
+import com.zukotuutori.mavenassist.services.AutoUpdateRunner;
 import com.zukotuutori.mavenassist.services.AutoUpdateService;
+import com.zukotuutori.mavenassist.services.AutoUpdateSettings;
 import com.zukotuutori.mavenassist.services.DependencyManagerService;
 import com.zukotuutori.mavenassist.services.UiCustomizationService;
 import com.zukotuutori.mavenassist.util.Notifier;
@@ -21,7 +25,6 @@ import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.ui.JBColor;
 import com.intellij.ui.components.JBLabel;
-import com.intellij.ui.components.JBScrollPane;
 import com.intellij.ui.table.JBTable;
 import com.intellij.util.IconUtil;
 import com.intellij.util.ui.JBUI;
@@ -39,7 +42,6 @@ import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.TableCellEditor;
 import javax.swing.table.TableCellRenderer;
 import java.awt.BorderLayout;
-import java.awt.Color;
 import java.awt.Component;
 import java.awt.Font;
 import java.awt.event.MouseAdapter;
@@ -52,16 +54,14 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Shown when the chosen directory contains a pom.xml: a compact list of all
  * dependencies with a "Show Details" button per row that opens everything else.
  * Which fields appear as table columns (and which only in the details dialog),
- * plus the action buttons' text, colors, order and size, are all user-customizable
- * via the "Customize UI" dialog and applied through {@link #applyCustomization()}.
- * Dependencies flagged "auto update" are bumped to the newest version automatically
- * whenever the project is saved.
+ * is user-customizable via the "Customize..." dialog and applied through
+ * {@link #applyCustomization()}. Dependencies flagged "auto update" are bumped to the
+ * newest version at the moments picked in that same dialog.
  */
 public class DependencyTablePanel extends JPanel {
 
@@ -102,9 +102,8 @@ public class DependencyTablePanel extends JPanel {
     private final JButton openPomButton = new JButton("Open");
     private final JButton openParentButton = new JButton("Open");
     private final JButton parentActionButton = new JButton("Add Parent Pom...");
-    private final AtomicBoolean autoUpdateRunning = new AtomicBoolean(false);
 
-    /** Resolved parent pom file (via relativePath), or null — controls the parent Open button. */
+    /** Resolved parent pom file (via relativePath), or null; controls the parent Open button. */
     private File parentPomFile;
 
     private final JBTable table;
@@ -154,16 +153,16 @@ public class DependencyTablePanel extends JPanel {
         super(new BorderLayout(0, JBUI.scale(8)));
         this.project = project;
         setBorder(JBUI.Borders.empty(8));
+        Theme.applyWindowBackground(this);
 
         tableFields = UiCustomizationService.getInstance().visibleTableFields();
         table = buildTable();
 
         add(new SectionBox("pom.xml", AllIcons.FileTypes.Xml, buildHeaderPanel()), BorderLayout.NORTH);
         JPanel tableWrap = new JPanel(new BorderLayout(0, JBUI.scale(8)));
+        tableWrap.setOpaque(false);
         tableWrap.add(buildFilterBar(), BorderLayout.NORTH);
-        JBScrollPane tableScroll = new JBScrollPane(table);
-        tableScroll.setBorder(JBUI.Borders.empty());
-        tableWrap.add(tableScroll, BorderLayout.CENTER);
+        tableWrap.add(TablePills.scroll(table), BorderLayout.CENTER);
         tableWrap.add(buildTableButtonsRow(), BorderLayout.SOUTH);
         add(new SectionBox("Dependencies", AllIcons.Nodes.PpLib, tableWrap), BorderLayout.CENTER);
 
@@ -209,7 +208,7 @@ public class DependencyTablePanel extends JPanel {
 
         deleteSelectedButton.setIcon(TablePills.TRASH_WHITE);
         deleteSelectedButton.putClientProperty("JButton.backgroundColor", TablePills.DELETE);
-        deleteSelectedButton.setForeground(Color.WHITE);
+        deleteSelectedButton.setForeground(Theme.ON_DESTRUCTIVE);
         deleteSelectedButton.addActionListener(e -> deleteMarked());
         JButton selectAllButton = new JButton("Select All");
         selectAllButton.setToolTipText("Tick every dependency currently shown (search/filter applied)");
@@ -309,13 +308,14 @@ public class DependencyTablePanel extends JPanel {
             public void run(@NotNull ProgressIndicator indicator) {
                 int deleted = 0;
                 List<String> failures = new ArrayList<>();
-                AutoUpdateService autoService = AutoUpdateService.getInstance();
+                AutoUpdateService autoService = AutoUpdateService.getInstance(project);
                 for (Dependency dep : toDelete) {
                     indicator.checkCanceled();
                     indicator.setText("Deleting " + dep.getKey() + "...");
                     try {
-                        PomUtils.removeDependency(pom, dep.getGroupId(), dep.getArtifactId());
-                        autoService.setAutoUpdate(pom.getAbsolutePath(), dep.getKey(), false);
+                        PomWriteAction.run(project, pom, "Delete Maven dependency",
+                                () -> PomUtils.removeDependency(pom, dep));
+                        autoService.setAutoUpdate(pom, dep.getKey(), false);
                         deleted++;
                     } catch (IOException e) {
                         failures.add(dep.getKey() + ": " + e.getMessage());
@@ -367,7 +367,7 @@ public class DependencyTablePanel extends JPanel {
     /** Re-derives the visible rows from the search text and the filter toggles. */
     private void applyRowFilter() {
         String query = searchField.getText().trim().toLowerCase(java.util.Locale.ROOT);
-        AutoUpdateService autoService = AutoUpdateService.getInstance();
+        AutoUpdateService autoService = AutoUpdateService.getInstance(project);
         visibleRows.clear();
         for (Row row : rows) {
             if (!query.isEmpty()
@@ -377,13 +377,14 @@ public class DependencyTablePanel extends JPanel {
                 continue;
             }
             if (onlyNewest
-                    && (row.latest.isEmpty() || "?".equals(row.latest)
-                        || !row.latest.equals(row.dependency.getVersion()))) {
+                    && (row.dependency.getVersion().isBlank()
+                        || row.latest.isEmpty() || "?".equals(row.latest)
+                        || VersionPolicy.isUpgrade(row.dependency.getVersion(), row.latest))) {
                 continue;
             }
             if (onlyAuto
                     && (pomFile == null
-                        || !autoService.isAutoUpdate(pomFile.getAbsolutePath(), row.dependency.getKey()))) {
+                        || !autoService.isAutoUpdate(pomFile, row.dependency.getKey()))) {
                 continue;
             }
             visibleRows.add(row);
@@ -417,7 +418,8 @@ public class DependencyTablePanel extends JPanel {
         parentActionButton.addActionListener(e -> addParentPom());
         // Normal button colors; the hierarchy icon points up to the parent.
         parentActionButton.setIcon(com.intellij.icons.AllIcons.Hierarchy.Supertypes);
-        pomLabel.setForeground(com.intellij.util.ui.UIUtil.getContextHelpForeground());
+        // Lazy, so the hint color follows a theme switch instead of freezing at construction time.
+        pomLabel.setForeground(JBColor.lazy(com.intellij.util.ui.UIUtil::getContextHelpForeground));
 
         JPanel header = new JPanel(new java.awt.GridLayout(0, 1, 0, JBUI.scale(2)));
         header.setOpaque(false);
@@ -477,12 +479,13 @@ public class DependencyTablePanel extends JPanel {
         parentPomFile = resolvedParent;
         openParentButton.setVisible(resolvedParent != null);
         pomLabel.setText(pomFile.getAbsolutePath());
-        parentLabel.setText("<html>Parent pom: <b>" + parentText + "</b></html>");
+        parentLabel.setText("<html>Parent pom: <b>"
+                + com.intellij.openapi.util.text.StringUtil.escapeXmlEntities(parentText)
+                + "</b></html>");
     }
 
     private @NotNull JBTable buildTable() {
-        JBTable table = new JBTable(model);
-        TablePills.modernize(table);
+        JBTable table = new ThemedTable(model);
 
         // Clicks: "Auto Update" cell toggles the flag, "Update" cell opens the version menu.
         table.addMouseListener(new MouseAdapter() {
@@ -507,7 +510,7 @@ public class DependencyTablePanel extends JPanel {
         return table;
     }
 
-    /** Assigns renderers, editors and widths — must run after every table structure change. */
+    /** Assigns renderers, editors and widths; must run after every table structure change. */
     private void configureTableColumns() {
         if (deleteMode) {
             table.getColumnModel().getColumn(0).setMaxWidth(JBUI.scale(30));
@@ -547,6 +550,15 @@ public class DependencyTablePanel extends JPanel {
                         : cached;
                 if (latest == null) {
                     Notifier.warn(project, "Could not determine the newest version of " + dep.getKey() + ".");
+                    return;
+                }
+                if (dep.getVersion().isBlank()) {
+                    Notifier.warn(project, dep.getKey() + " is managed by a parent/BOM. "
+                            + "Update that version source instead of adding an overriding <version>.");
+                    return;
+                }
+                if (!VersionPolicy.isUpgrade(dep.getVersion(), latest)) {
+                    Notifier.info(project, dep.getKey() + " is already at the newest stable version.");
                     return;
                 }
                 applyVersion(dep, latest);
@@ -608,7 +620,6 @@ public class DependencyTablePanel extends JPanel {
                 rows.add(row);
             }
             applyRowFilter();
-            fetchMissingLatestVersions();
         } catch (IOException e) {
             Notifier.error(project, "Could not read " + pomFile.getName() + ": " + e.getMessage());
         }
@@ -620,7 +631,7 @@ public class DependencyTablePanel extends JPanel {
             return;
         }
         Row row = visibleRows.get(rowIndex);
-        new DependencyDetailsDialog(project, row.dependency, row.latest, pomFile.getAbsolutePath(),
+        new DependencyDetailsDialog(project, row.dependency, row.latest, pomFile,
                 this::applyVersion, latest -> {
                     row.latest = latest;
                     latestCache.put(row.dependency.getKey(), latest);
@@ -644,7 +655,8 @@ public class DependencyTablePanel extends JPanel {
                     return;
                 }
                 try {
-                    PomUtils.setDependencyVersion(pom, dep.getGroupId(), dep.getArtifactId(), newVersion);
+                    PomWriteAction.run(project, pom, "Update Maven dependency",
+                            () -> PomUtils.setDependencyVersion(pom, dep, newVersion));
                 } catch (IOException e) {
                     Notifier.error(project, "Failed to update " + dep.getKey() + ": " + e.getMessage());
                     return;
@@ -679,12 +691,13 @@ public class DependencyTablePanel extends JPanel {
             @Override
             public void run(@NotNull ProgressIndicator indicator) {
                 try {
-                    PomUtils.removeDependency(pom, dep.getGroupId(), dep.getArtifactId());
+                    PomWriteAction.run(project, pom, "Delete Maven dependency",
+                            () -> PomUtils.removeDependency(pom, dep));
                 } catch (IOException e) {
                     Notifier.error(project, "Failed to delete " + dep.getKey() + ": " + e.getMessage());
                     return;
                 }
-                AutoUpdateService.getInstance().setAutoUpdate(pom.getAbsolutePath(), dep.getKey(), false);
+                AutoUpdateService.getInstance(project).setAutoUpdate(pom, dep.getKey(), false);
                 Notifier.info(project, "Deleted " + dep.getKey() + " from pom.xml. Building...");
                 ApplicationManager.getApplication().invokeLater(() -> {
                     LocalFileSystem.getInstance().refreshAndFindFileByIoFile(pom);
@@ -700,67 +713,24 @@ public class DependencyTablePanel extends JPanel {
             return;
         }
         Dependency dep = visibleRows.get(rowIndex).dependency;
-        AutoUpdateService service = AutoUpdateService.getInstance();
-        String pomPath = pomFile.getAbsolutePath();
-        service.setAutoUpdate(pomPath, dep.getKey(), !service.isAutoUpdate(pomPath, dep.getKey()));
+        AutoUpdateService service = AutoUpdateService.getInstance(project);
+        service.setAutoUpdate(pomFile, dep.getKey(), !service.isAutoUpdate(pomFile, dep.getKey()));
         // Re-filter: with "Only auto update" active, a turned-off row disappears immediately.
         applyRowFilter();
     }
 
     /**
-     * Bumps every dependency flagged "auto update" to the newest version.
-     * Called when the project is saved (and after external pom changes).
+     * Bumps every dependency flagged "auto update" to the newest version, if the given
+     * moment is one the user picked in "Customize...". The pass itself lives in
+     * {@link AutoUpdateRunner} so the triggers that fire with this panel closed behave
+     * identically.
      */
-    public void runAutoUpdate() {
+    public void runAutoUpdate(@NotNull AutoUpdateSettings.Trigger trigger) {
         File pom = pomFile;
-        if (pom == null || !pom.isFile() || !autoUpdateRunning.compareAndSet(false, true)) {
+        if (pom == null || !pom.isFile()) {
             return;
         }
-        AutoUpdateService service = AutoUpdateService.getInstance();
-        String pomPath = pom.getAbsolutePath();
-        List<Dependency> flagged = rows.stream()
-                .map(r -> r.dependency)
-                .filter(d -> service.isAutoUpdate(pomPath, d.getKey()))
-                .toList();
-        if (flagged.isEmpty()) {
-            autoUpdateRunning.set(false);
-            return;
-        }
-
-        new Task.Backgroundable(project, "Maven Assist: Auto-updating dependencies", true) {
-            @Override
-            public void run(@NotNull ProgressIndicator indicator) {
-                List<String> updated = new ArrayList<>();
-                for (Dependency dep : flagged) {
-                    indicator.checkCanceled();
-                    indicator.setText("Checking " + dep.getKey() + "...");
-                    String latest = MavenCentralClient.getLatestVersion(dep.getGroupId(), dep.getArtifactId());
-                    if (latest == null || latest.equals(dep.getVersion())) {
-                        continue;
-                    }
-                    try {
-                        PomUtils.setDependencyVersion(pom, dep.getGroupId(), dep.getArtifactId(), latest);
-                        updated.add(dep.getKey() + " → " + latest);
-                    } catch (IOException e) {
-                        Notifier.error(project, "Auto-update of " + dep.getKey() + " failed: " + e.getMessage());
-                    }
-                }
-                if (!updated.isEmpty()) {
-                    Notifier.info(project, "Auto-updated " + updated.size() + " dependencies:\n"
-                            + String.join("\n", updated) + "\nBuilding...");
-                    ApplicationManager.getApplication().invokeLater(() -> {
-                        LocalFileSystem.getInstance().refreshAndFindFileByIoFile(pom);
-                        reload();
-                    });
-                    MavenBuildRunner.build(project, pom.getParentFile(), null);
-                }
-            }
-
-            @Override
-            public void onFinished() {
-                autoUpdateRunning.set(false);
-            }
-        }.queue();
+        AutoUpdateRunner.runIfEnabled(project, trigger, pom, this::reload);
     }
 
     /**
@@ -824,7 +794,7 @@ public class DependencyTablePanel extends JPanel {
                                 applyRowFilter();
                             }
                         });
-                        if (!latest.equals(dep.getVersion())) {
+                        if (VersionPolicy.isUpgrade(dep.getVersion(), latest)) {
                             outdated.add(row.displayName() + ": " + dep.getVersion() + " → " + latest);
                         }
                     }
@@ -858,12 +828,13 @@ public class DependencyTablePanel extends JPanel {
                     String latest = row.latest.isEmpty() || "?".equals(row.latest)
                             ? MavenCentralClient.getLatestVersion(dep.getGroupId(), dep.getArtifactId())
                             : row.latest;
-                    if (latest == null || latest.equals(dep.getVersion())) {
+                    if (latest == null || !VersionPolicy.isUpgrade(dep.getVersion(), latest)) {
                         continue;
                     }
                     try {
                         indicator.setText("Updating " + dep.getKey() + " to " + latest + "...");
-                        PomUtils.setDependencyVersion(pom, dep.getGroupId(), dep.getArtifactId(), latest);
+                        PomWriteAction.run(project, pom, "Update Maven dependencies",
+                                () -> PomUtils.setDependencyVersion(pom, dep, latest));
                         updated++;
                     } catch (IOException e) {
                         failures.add(dep.getKey() + ": " + e.getMessage());
@@ -913,7 +884,8 @@ public class DependencyTablePanel extends JPanel {
                 return;
             }
             PomUtils.PomInfo parentInfo = PomUtils.readPomInfo(parentFile);
-            PomUtils.setParentPom(pomFile, parentInfo, parentFile);
+            PomWriteAction.run(project, pomFile, "Set parent POM",
+                    () -> PomUtils.setParentPom(pomFile, parentInfo, parentFile));
             LocalFileSystem.getInstance().refreshAndFindFileByIoFile(pomFile);
             Notifier.info(project, "Parent pom set to " + parentInfo.groupId() + ":"
                     + parentInfo.artifactId() + ":" + parentInfo.version() + ". Building...");
@@ -941,10 +913,11 @@ public class DependencyTablePanel extends JPanel {
                 "Change to \"pom\"", "Cancel",
                 com.intellij.openapi.ui.Messages.getWarningIcon());
         if (answer != com.intellij.openapi.ui.Messages.YES) {
-            Notifier.warn(project, "Parent pom not set — its packaging must be \"pom\".");
+            Notifier.warn(project, "Parent pom was not set. Its packaging must be \"pom\".");
             return false;
         }
-        PomUtils.ensurePomPackaging(parentFile);
+        PomWriteAction.run(project, parentFile, "Set parent POM packaging",
+                () -> PomUtils.ensurePomPackaging(parentFile));
         LocalFileSystem.getInstance().refreshAndFindFileByIoFile(parentFile);
         return true;
     }
@@ -979,9 +952,7 @@ public class DependencyTablePanel extends JPanel {
                     if (!fixedVersionKeys.contains(dep.getKey())) {
                         indicator.setText("Fetching newest version of " + dep.getKey() + "...");
                         String latest = MavenCentralClient.getLatestVersion(dep.getGroupId(), dep.getArtifactId());
-                        if (latest != null) {
-                            version = latest;
-                        }
+                        version = VersionPolicy.newestOrFallback(version, latest);
                     }
                     resolved.add(dep.withVersion(version));
                 }
@@ -1005,23 +976,24 @@ public class DependencyTablePanel extends JPanel {
                     return;
                 }
                 if (!duplicates.isEmpty()) {
-                    Notifier.error(project, "Already in the pom — not added again: "
+                    Notifier.error(project, "Already in the pom. It was not added again: "
                             + String.join(", ", duplicates));
                 }
                 if (toAdd.isEmpty()) {
                     return;
                 }
                 try {
-                    PomUtils.addDependencies(pom, toAdd);
+                    PomWriteAction.run(project, pom, "Add Maven dependencies",
+                            () -> PomUtils.addDependencies(pom, toAdd));
                 } catch (IOException e) {
                     Notifier.error(project, "Failed to add dependencies: " + e.getMessage());
                     return;
                 }
                 int autoUpdateCount = 0;
-                AutoUpdateService service = AutoUpdateService.getInstance();
+                AutoUpdateService service = AutoUpdateService.getInstance(project);
                 for (Dependency dep : toAdd) {
                     if (autoUpdateKeys.contains(dep.getKey())) {
-                        service.setAutoUpdate(pom.getAbsolutePath(), dep.getKey(), true);
+                        service.setAutoUpdate(pom, dep.getKey(), true);
                         autoUpdateCount++;
                     }
                 }
@@ -1104,8 +1076,8 @@ public class DependencyTablePanel extends JPanel {
                 case ARTIFACT_ID -> row.dependency.getArtifactId();
                 case VERSION -> row.dependency.getVersion().isEmpty() ? "(managed)" : row.dependency.getVersion();
                 case LATEST_VERSION -> row.latest.isEmpty() ? "?" : row.latest;
-                case AUTO_UPDATE -> pomFile != null && AutoUpdateService.getInstance()
-                        .isAutoUpdate(pomFile.getAbsolutePath(), row.dependency.getKey());
+                case AUTO_UPDATE -> pomFile != null && AutoUpdateService.getInstance(project)
+                        .isAutoUpdate(pomFile, row.dependency.getKey());
             };
         }
 
@@ -1166,6 +1138,9 @@ public class DependencyTablePanel extends JPanel {
         public Component getTableCellEditorComponent(JTable table, Object value, boolean isSelected,
                                                      int row, int column) {
             editedRow = row;
+            // Cell editors sit outside the component tree, so a theme switch never reaches
+            // them; re-installing the UI here keeps the button in the IDE's current theme.
+            button.updateUI();
             return button;
         }
 

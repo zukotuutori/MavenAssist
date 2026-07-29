@@ -1,6 +1,7 @@
 package com.zukotuutori.mavenassist.ui;
 
 import com.zukotuutori.mavenassist.maven.MavenCentralClient;
+import com.zukotuutori.mavenassist.maven.VersionPolicy;
 import com.zukotuutori.mavenassist.model.Dependency;
 import com.zukotuutori.mavenassist.services.AutoUpdateService;
 import com.zukotuutori.mavenassist.services.UiCustomizationService;
@@ -22,6 +23,7 @@ import javax.swing.JPanel;
 import java.awt.Font;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
+import java.io.File;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
@@ -32,7 +34,8 @@ import java.util.function.Consumer;
 public class DependencyDetailsDialog extends DialogWrapper {
 
     private final Dependency dependency;
-    private final String pomPath;
+    private final Project project;
+    private final File pom;
     private final BiConsumer<Dependency, String> versionApplier;
     private final Consumer<String> latestVersionCache;
 
@@ -48,15 +51,16 @@ public class DependencyDetailsDialog extends DialogWrapper {
      * @param versionApplier     writes the given version into the pom and builds
      * @param latestVersionCache receives the newest version once fetched (for table caching)
      */
-    public DependencyDetailsDialog(@Nullable Project project,
+    public DependencyDetailsDialog(@NotNull Project project,
                                    @NotNull Dependency dependency,
                                    @Nullable String cachedLatest,
-                                   @NotNull String pomPath,
+                                   @NotNull File pom,
                                    @NotNull BiConsumer<Dependency, String> versionApplier,
                                    @NotNull Consumer<String> latestVersionCache) {
         super(project, true);
+        this.project = project;
         this.dependency = dependency;
-        this.pomPath = pomPath;
+        this.pom = pom;
         this.versionApplier = versionApplier;
         this.latestVersionCache = latestVersionCache;
 
@@ -97,6 +101,12 @@ public class DependencyDetailsDialog extends DialogWrapper {
         if (custom.isShownInDetails(Field.ARTIFACT_ID)) {
             addRow(panel, gbc, row++, "Artifact id:", dependency.getArtifactId());
         }
+        if (!dependency.getType().isEmpty()) {
+            addRow(panel, gbc, row++, "Type:", dependency.getType());
+        }
+        if (!dependency.getClassifier().isEmpty()) {
+            addRow(panel, gbc, row++, "Classifier:", dependency.getClassifier());
+        }
         if (custom.isShownInDetails(Field.VERSION)) {
             addRow(panel, gbc, row++, "Current version:",
                     dependency.getVersion().isEmpty() ? "(managed by parent)" : dependency.getVersion());
@@ -113,10 +123,10 @@ public class DependencyDetailsDialog extends DialogWrapper {
         }
 
         if (custom.isShownInDetails(Field.AUTO_UPDATE)) {
-            JBCheckBox autoUpdateCheck = new JBCheckBox("Auto update: bump to the newest version on every project save",
-                    AutoUpdateService.getInstance().isAutoUpdate(pomPath, dependency.getKey()));
-            autoUpdateCheck.addActionListener(e -> AutoUpdateService.getInstance()
-                    .setAutoUpdate(pomPath, dependency.getKey(), autoUpdateCheck.isSelected()));
+            JBCheckBox autoUpdateCheck = new JBCheckBox("Auto update at the times selected under Customize",
+                    AutoUpdateService.getInstance(project).isAutoUpdate(pom, dependency.getKey()));
+            autoUpdateCheck.addActionListener(e -> AutoUpdateService.getInstance(project)
+                    .setAutoUpdate(pom, dependency.getKey(), autoUpdateCheck.isSelected()));
             gbc.gridy = row++;
             gbc.gridx = 0;
             gbc.gridwidth = 2;
@@ -153,7 +163,7 @@ public class DependencyDetailsDialog extends DialogWrapper {
         panel.add(new JBLabel(label), gbc);
         gbc.gridx = 1;
         gbc.weightx = 1;
-        JBLabel valueLabel = new JBLabel(value);
+        JBLabel valueLabel = new JBLabel(UiText.html(value));
         valueLabel.setFont(valueLabel.getFont().deriveFont(Font.BOLD));
         panel.add(valueLabel, gbc);
     }
@@ -174,10 +184,12 @@ public class DependencyDetailsDialog extends DialogWrapper {
 
     private void setNewestVersion(@NotNull String version) {
         newestVersion = version;
-        boolean upToDate = version.equals(dependency.getVersion());
-        newestLabel.setText(version + (upToDate ? "  (up to date)" : ""));
+        boolean managed = dependency.getVersion().isBlank();
+        boolean updateAvailable = VersionPolicy.isUpgrade(dependency.getVersion(), version);
+        newestLabel.setText(version + (managed ? "  (current version is managed)"
+                : updateAvailable ? "" : "  (no newer stable release)"));
         newestLabel.setFont(newestLabel.getFont().deriveFont(Font.BOLD));
-        updateButton.setEnabled(!upToDate);
+        updateButton.setEnabled(updateAvailable);
     }
 
     private void changeVersion() {

@@ -2,6 +2,8 @@ package com.zukotuutori.mavenassist.ui;
 
 import com.zukotuutori.mavenassist.maven.MavenCentralClient;
 import com.zukotuutori.mavenassist.maven.PomUtils;
+import com.zukotuutori.mavenassist.maven.PomWriteAction;
+import com.zukotuutori.mavenassist.maven.VersionPolicy;
 import com.zukotuutori.mavenassist.model.Dependency;
 import com.zukotuutori.mavenassist.services.DependencyManagerService;
 import com.zukotuutori.mavenassist.services.PomTemplateService;
@@ -18,7 +20,6 @@ import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.ui.SearchTextField;
 import com.intellij.ui.components.JBLabel;
-import com.intellij.ui.components.JBScrollPane;
 import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -38,6 +39,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Shown when the chosen directory contains no pom.xml: lets the user create one,
@@ -57,12 +59,14 @@ public class CreatePomPanel extends JPanel {
             new DependencyPickerTable(this::showDependencyDetails, true);
 
     private File targetDirectory;
+    private final AtomicBoolean createInProgress = new AtomicBoolean();
 
     public CreatePomPanel(@NotNull Project project, @NotNull Runnable onPomCreated) {
         super(new BorderLayout(0, JBUI.scale(6)));
         this.project = project;
         this.onPomCreated = onPomCreated;
         setBorder(JBUI.Borders.empty(8));
+        Theme.applyWindowBackground(this);
 
         add(new SectionBox("New pom.xml", com.intellij.icons.AllIcons.FileTypes.Xml, buildFormPanel()),
                 BorderLayout.NORTH);
@@ -154,7 +158,7 @@ public class CreatePomPanel extends JPanel {
         header.add(searchRow, BorderLayout.SOUTH);
 
         panel.add(header, BorderLayout.NORTH);
-        panel.add(new JBScrollPane(dependencyPicker), BorderLayout.CENTER);
+        panel.add(TablePills.scroll(dependencyPicker), BorderLayout.CENTER);
         dependencyPicker.bindSearch(dependencySearchField);
         return panel;
     }
@@ -163,6 +167,7 @@ public class CreatePomPanel extends JPanel {
         // Vertical stack of full-width buttons: stays fully visible even in a narrow tool window
         // (a FlowLayout would wrap buttons into a clipped, invisible second row).
         JPanel panel = new JPanel(new java.awt.GridLayout(0, 1, 0, JBUI.scale(4)));
+        panel.setOpaque(false);
         panel.setBorder(JBUI.Borders.emptyTop(4));
 
         JButton addToManagerButton = new JButton("Add Dependencies to Manager");
@@ -173,13 +178,11 @@ public class CreatePomPanel extends JPanel {
         });
         panel.add(addToManagerButton);
 
-        // Same blue as "MVN Clean Install"; the "new file" icon marks the primary action.
+        // Same accent as "MVN Clean Install"; the "new file" icon marks the primary action.
         JButton createButton = new JButton("Create pom.xml",
                 com.intellij.util.IconUtil.colorize(com.intellij.icons.AllIcons.Actions.AddFile,
                         java.awt.Color.WHITE));
-        createButton.putClientProperty("JButton.backgroundColor",
-                new com.intellij.ui.JBColor(new java.awt.Color(0x3574F0), new java.awt.Color(0x3574F0)));
-        createButton.setForeground(java.awt.Color.WHITE);
+        Theme.applyAccent(createButton);
         createButton.addActionListener(e -> createPom());
         panel.add(createButton);
 
@@ -187,7 +190,7 @@ public class CreatePomPanel extends JPanel {
     }
 
     private void reloadDependencyList() {
-        // Checked entries stay checked across reloads — the picker matches them by key.
+        // Checked entries stay checked across reloads because the picker matches them by key.
         dependencyPicker.setDependencies(DependencyManagerService.getInstance().getAllDependencies());
     }
 
@@ -222,6 +225,7 @@ public class CreatePomPanel extends JPanel {
 
         reloadDependencyList();
         dependencyPicker.checkNone();
+        dependencyPicker.clearCustomVersions();
 
         Set<String> available = new HashSet<>();
         for (Dependency d : DependencyManagerService.getInstance().getAllDependencies()) {
@@ -235,6 +239,9 @@ public class CreatePomPanel extends JPanel {
             }
             if (available.contains(d.getKey())) {
                 dependencyPicker.setChecked(d.getKey(), true);
+                if (!template.useNewestVersions && !d.getVersion().isEmpty()) {
+                    dependencyPicker.setCustomVersion(d.getKey(), d.getVersion());
+                }
             } else {
                 missing.add(d.getKey());
             }
@@ -272,10 +279,11 @@ public class CreatePomPanel extends JPanel {
                     "Change to \"pom\"", "Cancel",
                     com.intellij.openapi.ui.Messages.getWarningIcon());
             if (answer != com.intellij.openapi.ui.Messages.YES) {
-                Notifier.warn(project, "pom.xml not created — the parent's packaging must be \"pom\".");
+                Notifier.warn(project, "pom.xml was not created. The parent's packaging must be \"pom\".");
                 return false;
             }
-            PomUtils.ensurePomPackaging(parentFile);
+            PomWriteAction.run(project, parentFile, "Set parent POM packaging",
+                    () -> PomUtils.ensurePomPackaging(parentFile));
             LocalFileSystem.getInstance().refreshAndFindFileByIoFile(parentFile);
             return true;
         } catch (java.io.IOException e) {
@@ -292,11 +300,22 @@ public class CreatePomPanel extends JPanel {
             Notifier.warn(project, "No valid target directory chosen.");
             return;
         }
+        File pomFile = new File(directory, "pom.xml");
+        if (pomFile.exists()) {
+            Notifier.warn(project, "pom.xml already exists. Maven Assist will not overwrite it.");
+            onPomCreated.run();
+            return;
+        }
+        if (!createInProgress.compareAndSet(false, true)) {
+            Notifier.warn(project, "pom.xml creation is already in progress.");
+            return;
+        }
         String groupId = groupIdField.getText().trim();
         String artifactId = artifactIdField.getText().trim();
         String version = versionField.getText().trim();
         if (groupId.isEmpty() || artifactId.isEmpty() || version.isEmpty()) {
             Notifier.warn(project, "Group id, artifact id and version must not be empty.");
+            createInProgress.set(false);
             return;
         }
 
@@ -304,16 +323,16 @@ public class CreatePomPanel extends JPanel {
         File parentPomFile = parentPath.isEmpty() ? null : new File(parentPath);
         if (parentPomFile != null && !parentPomFile.isFile()) {
             Notifier.warn(project, "Parent pom not found: " + parentPath);
+            createInProgress.set(false);
             return;
         }
         if (parentPomFile != null && !ensureParentPackaging(parentPomFile)) {
+            createInProgress.set(false);
             return;
         }
 
         List<Dependency> selected = getSelectedDependencies();
         Map<String, String> customVersions = dependencyPicker.getCustomVersions();
-        File pomFile = new File(directory, "pom.xml");
-
         new Task.Backgroundable(project, "Maven Assist: Creating pom.xml", true) {
             @Override
             public void run(@NotNull ProgressIndicator indicator) {
@@ -323,23 +342,26 @@ public class CreatePomPanel extends JPanel {
                         indicator.setText("Reading parent pom...");
                         parentInfo = PomUtils.readPomInfo(parentPomFile);
                     }
+                    PomUtils.PomInfo finalParentInfo = parentInfo;
 
                     List<Dependency> resolved = new ArrayList<>();
                     for (Dependency dep : selected) {
                         indicator.checkCanceled();
-                        // A pinned version always wins; otherwise the newest release is used
+                        // A pinned version always wins; otherwise the newest stable release is used
                         // (falling back to the catalog version if Central is unreachable).
                         String depVersion = customVersions.get(dep.getKey());
                         if (depVersion == null) {
                             indicator.setText("Fetching newest version of " + dep.getKey() + "...");
                             String latest = MavenCentralClient.getLatestVersion(dep.getGroupId(), dep.getArtifactId());
-                            depVersion = latest != null ? latest : dep.getVersion();
+                            depVersion = VersionPolicy.newestOrFallback(dep.getVersion(), latest);
                         }
                         resolved.add(dep.withVersion(depVersion));
                     }
 
                     indicator.setText("Writing pom.xml...");
-                    PomUtils.createPom(pomFile, groupId, artifactId, version, parentInfo, parentPomFile, resolved);
+                    PomWriteAction.run(project, pomFile, "Create pom.xml",
+                            () -> PomUtils.createPom(pomFile, groupId, artifactId, version,
+                                    finalParentInfo, parentPomFile, resolved));
 
                     ApplicationManager.getApplication().invokeLater(() -> {
                         LocalFileSystem.getInstance().refreshAndFindFileByIoFile(pomFile);
@@ -350,6 +372,11 @@ public class CreatePomPanel extends JPanel {
                 } catch (Exception ex) {
                     Notifier.error(project, "Failed to create pom.xml: " + ex.getMessage());
                 }
+            }
+
+            @Override
+            public void onFinished() {
+                createInProgress.set(false);
             }
         }.queue();
     }
@@ -413,7 +440,7 @@ public class CreatePomPanel extends JPanel {
             panel.add(new JBLabel(label), gbc);
             gbc.gridx = 1;
             gbc.weightx = 1;
-            JBLabel valueLabel = new JBLabel(value);
+            JBLabel valueLabel = new JBLabel(UiText.html(value));
             valueLabel.setFont(valueLabel.getFont().deriveFont(Font.BOLD));
             panel.add(valueLabel, gbc);
         }

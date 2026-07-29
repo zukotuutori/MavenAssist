@@ -31,8 +31,8 @@ import java.io.File;
 import java.util.List;
 
 /**
- * Creates a reusable pom template. Offers the same choices as the pom-creation view —
- * coordinates, an optional parent pom, the newest-version flag and the dependencies —
+ * Creates a reusable pom template. Offers the same choices as the pom-creation view:
+ * coordinates, an optional parent pom, the newest-version flag and the dependencies.
  * plus the name the template is stored under.
  */
 class CreateTemplateDialog extends DialogWrapper {

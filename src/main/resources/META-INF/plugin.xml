@@ -1,23 +1,45 @@
 <idea-plugin>
     <id>com.zukotuutori.mavenassist</id>
     <name>Maven Assist</name>
-    <vendor>zukotuutori</vendor>
+    <vendor url="https://github.com/zukotuutori/MavenAssist">zukotuutori</vendor>
+
+    <change-notes><![CDATA[
+        <h3>Maven Assist 2.0.0: What's New Since Version 1.0.1?</h3>
+        <p>Maven Assist 2.0.0 makes automatic dependency updates more controlled, secure, and flexible.
+            You can now decide exactly when automatic updates run: when saving, when opening a project,
+            before <i>MVN Clean Install</i>, or through a custom keyboard shortcut.</p>
+        <p>Major-version updates are never applied without confirmation. Maven Assist shows the current
+            and new versions together with a link to the release page. You can then apply the update,
+            skip it for now, or disable auto update for that dependency. Automatic updates also use only
+            stable versions that are actually newer than the currently installed version.</p>
+        <p>Editing <code>pom.xml</code> files is now significantly more robust. Dependencies with different
+            Maven types or classifiers are handled independently. Shared version properties no longer
+            cause unrelated dependencies to be changed accidentally. Entries in
+            <code>dependencyManagement</code>, profiles, build and reporting sections, as well as
+            dependencies belonging to Maven plugins, remain untouched. Existing <code>pom.xml</code>
+            files are no longer overwritten during creation.</p>
+        <p>Privacy and security have also been improved. Automatic actions respect IntelliJ Safe Mode,
+            project information is stored without absolute user paths, and network requests are made only
+            for features you explicitly use. The optional Maven download is verified against a pinned
+            SHA-512 checksum and now includes size limits, timeouts, and reliable cleanup of temporary
+            files.</p>
+        <p>The entire interface now automatically follows the active IntelliJ theme, including custom and
+            third-party themes. Custom versions also work with private Maven repositories and are no
+            longer incorrectly checked against Maven Central. Numerous smaller issues involving concurrent
+            updates, builds, notifications, and POM modifications have been fixed as well.</p>
+    ]]></change-notes>
 
     <description><![CDATA[
         <p><b>Your friendly co-pilot for <code>pom.xml</code> files.</b> Maven Assist looks at the directory
+        you point it at and gives you exactly the right tools for what it finds: create a brand-new pom.xml in
+        seconds, or inspect and update an existing one with one-click stable version upgrades from
+        Maven Central.</p>
         <ul>
             <li><b>Create pom.xml's insanely easy</b></li>
             <li><b>Add, delete and manage dependencies with only a few clicks</b></li>
             <li><b>Quickly create templates and reuse them in other projects</b></li>
             <li><b>and many features more...</b></li>
         </ul>
-
-
-
-
-        you point it at and gives you exactly the right tools for what it finds: create a brand-new pom.xml in
-        seconds, or inspect and update an existing one with one-click version upgrades straight from
-        Maven Central.</p>
 
         <h2>What it does</h2>
         <ul>
@@ -26,13 +48,15 @@
             <li><b>Creates poms from a form, or from a template you created.</b> Fill in the coordinates, optionally
                 point at a parent pom, tick the dependencies you want, and press one button. Save the whole
                 setup as a template and reuse it in every project.</li>
-            <li><b>Updates dependencies with one click.</b> Every row has an <i>Update</i> button that bumps
-                it to the newest release and rebuilds. <i>Update All</i> does the whole pom at once.</li>
-            <li><b>Keeps dependencies fresh automatically.</b> Flag any dependency and it jumps to the newest
-                version every time you save the project.</li>
+            <li><b>Updates dependencies with one click.</b> Every row has an <i>Update</i> button that moves
+                it to the newest stable release and rebuilds. <i>Update All</i> does the whole pom at once.</li>
+            <li><b>Keeps dependencies fresh automatically.</b> Flag any dependency and it moves to the newest
+                version by itself at the moments you pick, and never across a major version without
+                asking you first.</li>
             <li><b>Preserves your formatting.</b> Edits are surgical: indentation, comments and
-                <code>${property}</code> versions all survive. Entries under <code>dependencyManagement</code>
-                and inside <code>profiles</code> are never touched by accident.</li>
+                safe <code>${property}</code> versions survive. Entries under <code>dependencyManagement</code>,
+                <code>profiles</code>, <code>build</code> and <code>reporting</code> are never touched by
+                accident. A plugin's own dependencies stay a plugin's own dependencies.</li>
             <li><b>Grows with you.</b> Paste any dependency snippet once, give it a name, and it stays in
                 your catalog forever, across projects and IDE restarts.</li>
         </ul>
@@ -94,12 +118,31 @@
         </ul>
         <p>Press <b>Add</b> and they land in your pom exactly as configured, with a build kicked off for you.</p>
 
-        <h2>Auto update on every save</h2>
+        <h2>Auto update, on your schedule</h2>
         <p>The table has an <b>auto update</b> column: <span style="color:green;">green</span> means on,
-        <span style="color:red;">red</span> means off, and a click toggles it. Whenever you save the project,
-        Maven Assist checks the green-flagged dependencies against Maven Central and bumps any that fell
-        behind, pom rewritten, build started. The tool window reloads on every save too, so what you see
-        always matches what is on disk.</p>
+        <span style="color:red;">red</span> means off, and a click toggles it. Maven Assist then checks the
+        green-flagged dependencies against Maven Central and bumps any that fell behind to a newer stable release,
+        pom rewritten,
+        build started.</p>
+        <p><b>You decide when that happens.</b> Press <b>Customize...</b> at the bottom of the tool window
+        and tick any combination of:</p>
+        <ul>
+            <li><b>Every time I save the project:</b> the default.</li>
+            <li><b>When the project is opened:</b> start each session on the newest versions.</li>
+            <li><b>Right before "MVN Clean Install" runs:</b> update, then do the full build in one go.</li>
+            <li><b>When you press a shortcut:</b> tick it, click the field below and press the key
+                combination you want. It is stored in your IDE keymap, so you can also review or
+                change it later under <i>Settings | Keymap</i>, and the same command is available
+                through <i>Find Action</i> at any time.</li>
+        </ul>
+        <p>Tick nothing and auto update only ever runs when you ask for it. A save trigger is scoped to
+        files in this project; an external pom change only refreshes the table.</p>
+        <p><b>Major versions are never crossed unattended.</b> A jump like 2.x to 3.x is the upgrade
+        that actually breaks builds, so Maven Assist stops and asks. It shows the old and the new
+        version and a link to the release page on Maven Central. Answer <i>Update</i>, <i>Not Now</i>,
+        or <i>Never</i>, which switches auto update off for that one dependency. Several pending
+        major updates are asked one after another. Minor and patch releases are still applied
+        silently; anything left behind is listed in a notification.</p>
 
         <h2>Your own catalog</h2>
         <p>Press <b>Add Own to Manager…</b> at the bottom of the <b>Add Dependencies</b> window, or
@@ -123,6 +166,25 @@
                 whole machine.</li>
             <li>Version lookups run in the background. The IDE never freezes.</li>
         </ul>
+
+        <h2>What leaves your machine</h2>
+        <p>Maven Assist itself makes direct network requests only for features you invoke or dependencies
+        you explicitly flag for automatic update:</p>
+        <ul>
+            <li><b>search.maven.org:</b> when checking updates, choosing <i>Newest</i>, viewing version
+                details, creating/adding a dependency configured to use newest, or running an enabled
+                auto-update trigger. A lookup sends that dependency's <code>groupId</code> and
+                <code>artifactId</code>. These coordinates can reveal private naming conventions, so no
+                lookup is started merely by opening or refreshing the tool window. Custom pinned versions
+                are accepted without contacting Central.</li>
+            <li><b>dlcdn.apache.org / archive.apache.org:</b> only if you explicitly ask it to install
+                Maven for you. The download is checked against a pinned SHA-512 and discarded on
+                mismatch.</li>
+        </ul>
+        <p>Builds and package-manager installs are external tools: Maven, Homebrew or winget may contact
+        repositories configured on your machine. Maven Assist does not control or inspect those requests.</p>
+        <p>There is no telemetry, no analytics and no account. Your settings stay in your IDE
+        configuration and your project's workspace file, with machine paths excluded from roaming state.</p>
     ]]></description>
 
     <depends>com.intellij.modules.platform</depends>
@@ -133,5 +195,16 @@
                     icon="/icons/mavenAssist.svg"
                     factoryClass="com.zukotuutori.mavenassist.ui.MavenAssistToolWindowFactory"/>
         <notificationGroup id="Maven Assist" displayType="BALLOON"/>
+        <postStartupActivity
+                implementation="com.zukotuutori.mavenassist.startup.AutoUpdateOnOpenActivity"/>
     </extensions>
+
+    <actions>
+        <!-- No default keyboard shortcut on purpose: the user assigns one in "Customize...",
+             or under Settings | Keymap. Both write to the same keymap entry. -->
+        <action id="MavenAssist.RunAutoUpdate"
+                class="com.zukotuutori.mavenassist.actions.RunAutoUpdateAction"
+                text="Maven Assist: Run Auto Update"
+                description="Updates every dependency flagged &quot;auto update&quot; to its newest stable version"/>
+    </actions>
 </idea-plugin>

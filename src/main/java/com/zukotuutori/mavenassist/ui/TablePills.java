@@ -2,6 +2,7 @@ package com.zukotuutori.mavenassist.ui;
 
 import com.intellij.icons.AllIcons;
 import com.intellij.ui.JBColor;
+import com.intellij.ui.components.JBScrollPane;
 import com.intellij.ui.table.JBTable;
 import com.intellij.util.IconUtil;
 import com.intellij.util.ui.JBUI;
@@ -11,6 +12,7 @@ import org.jetbrains.annotations.Nullable;
 import javax.swing.Icon;
 import javax.swing.JComponent;
 import javax.swing.JTable;
+import javax.swing.table.JTableHeader;
 import javax.swing.table.TableCellRenderer;
 import java.awt.Color;
 import java.awt.Component;
@@ -34,12 +36,31 @@ final class TablePills {
     private TablePills() {
     }
 
-    /** Applies the shared modern look: striped rows, no grid lines, roomier rows. */
+    /**
+     * Applies the shared modern look: striped rows, no grid lines, roomier rows,
+     * and so the table blends into the card it sits on instead of painting the
+     * theme's stark list surface, the card background.
+     */
     static void modernize(@NotNull JBTable table) {
         table.setShowGrid(false);
         table.setIntercellSpacing(new Dimension(0, 0));
         table.setRowHeight(JBUI.scale(28));
         table.setStriped(true);
+        Theme.applyCardBackground(table);
+        JTableHeader header = table.getTableHeader();
+        if (header != null) {
+            Theme.applyCardBackground(header);
+        }
+    }
+
+    /** Wraps a table in a scroll pane whose borders and empty area match the card too. */
+    static @NotNull JBScrollPane scroll(@NotNull JBTable table) {
+        JBScrollPane scrollPane = new JBScrollPane(table);
+        scrollPane.setBorder(JBUI.Borders.empty());
+        scrollPane.setViewportBorder(JBUI.Borders.empty());
+        scrollPane.setOpaque(false);
+        scrollPane.getViewport().setOpaque(false);
+        return scrollPane;
     }
 
     /** A rounded colored capsule painted with a small inset; optionally with a centered icon. */
@@ -63,6 +84,12 @@ final class TablePills {
         protected void paintComponent(Graphics g) {
             Graphics2D g2 = (Graphics2D) g.create();
             g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            // JBTable marks renderers opaque to paint the row stripe/hover, which obliges us to
+            // fill our bounds; otherwise the margin around the pill keeps whatever was there.
+            if (isOpaque()) {
+                g2.setColor(getBackground());
+                g2.fillRect(0, 0, getWidth(), getHeight());
+            }
             int inset = JBUI.scale(4);
             int arc = JBUI.scale(10);
             g2.setColor(color);
@@ -82,7 +109,7 @@ final class TablePills {
                                                        boolean hasFocus, int row, int column) {
             boolean on = Boolean.TRUE.equals(value);
             setPill(on ? AUTO_ON : AUTO_OFF, null,
-                    on ? "Auto update is ON — updated to the newest version on every project save. Click to turn off."
+                    on ? "Auto update is ON. It is checked at the times selected under Customize. Click to turn off."
                             : "Auto update is OFF. Click to turn on.");
             return this;
         }

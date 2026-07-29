@@ -6,7 +6,6 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.ui.ValidationInfo;
-import com.intellij.ui.SimpleListCellRenderer;
 import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBList;
 import com.intellij.ui.components.JBScrollPane;
@@ -14,13 +13,15 @@ import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import javax.swing.DefaultListCellRenderer;
 import javax.swing.DefaultListModel;
 import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JPanel;
+import javax.swing.JList;
 import javax.swing.ListSelectionModel;
 import java.awt.BorderLayout;
-import java.awt.Color;
+import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.event.MouseAdapter;
@@ -53,7 +54,15 @@ class ChooseTemplateDialog extends DialogWrapper {
         panel.add(new JBLabel("Pick a template to fill in the pom form:"), BorderLayout.NORTH);
 
         list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-        list.setCellRenderer(SimpleListCellRenderer.create("", ChooseTemplateDialog::describe));
+        list.setCellRenderer(new DefaultListCellRenderer() {
+            @Override
+            public Component getListCellRendererComponent(JList<?> source, Object value, int index,
+                                                          boolean selected, boolean focused) {
+                super.getListCellRendererComponent(source, value, index, selected, focused);
+                setText(UiText.html(value instanceof Template template ? describe(template) : ""));
+                return this;
+            }
+        });
         list.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseClicked(MouseEvent e) {
@@ -75,7 +84,7 @@ class ChooseTemplateDialog extends DialogWrapper {
         // Same red pill as the delete buttons in the dependency table.
         JButton deleteButton = new JButton("Delete", TablePills.TRASH_WHITE);
         deleteButton.putClientProperty("JButton.backgroundColor", TablePills.DELETE);
-        deleteButton.setForeground(Color.WHITE);
+        deleteButton.setForeground(Theme.ON_DESTRUCTIVE);
         deleteButton.setToolTipText("Delete the selected template permanently");
         deleteButton.addActionListener(e -> deleteSelected());
         buttons.add(deleteButton);
@@ -84,10 +93,10 @@ class ChooseTemplateDialog extends DialogWrapper {
         return panel;
     }
 
-    /** "Name — com.example:my-app:1.0.0 · 3 dependencies" */
+    /** "Name - com.example:my-app:1.0.0 · 3 dependencies" */
     private static @NotNull String describe(@NotNull Template template) {
         int count = template.dependencies == null ? 0 : template.dependencies.size();
-        return template.name + "  —  "
+        return template.name + " - "
                 + template.groupId + ":" + template.artifactId + ":" + template.version
                 + "  ·  " + count + (count == 1 ? " dependency" : " dependencies");
     }
@@ -155,7 +164,7 @@ class ChooseTemplateDialog extends DialogWrapper {
     @Override
     protected @Nullable ValidationInfo doValidate() {
         if (model.isEmpty()) {
-            return new ValidationInfo("No templates yet — press \"Create Template...\" to add one.", list);
+            return new ValidationInfo("No templates yet. Press \"Create Template...\" to add one.", list);
         }
         if (list.getSelectedValue() == null) {
             return new ValidationInfo("Select a template.", list);

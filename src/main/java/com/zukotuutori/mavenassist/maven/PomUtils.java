@@ -13,12 +13,17 @@ import javax.xml.parsers.DocumentBuilderFactory;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.PosixFilePermission;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -49,11 +54,13 @@ public final class PomUtils {
             String groupId = childText(dep, "groupId");
             String artifactId = childText(dep, "artifactId");
             String version = childText(dep, "version");
+            String type = childText(dep, "type");
+            String classifier = childText(dep, "classifier");
             if (version != null && version.startsWith("${") && version.endsWith("}")) {
                 version = properties.getOrDefault(version.substring(2, version.length() - 1), version);
             }
             if (groupId != null && artifactId != null) {
-                result.add(new Dependency(groupId, artifactId, version));
+                result.add(new Dependency(groupId, artifactId, version, null, type, classifier));
             }
         }
         return result;
@@ -122,7 +129,7 @@ public final class PomUtils {
 
     /**
      * True when the pom's &lt;parent&gt; already points at exactly this file and the
-     * declared coordinates still match the parent's — re-selecting it changes nothing.
+     * declared coordinates still match the parent's, so re-selecting it changes nothing.
      */
     public static boolean parentAlreadySet(@NotNull File pomFile, @NotNull File parentFile) throws IOException {
         File current = readParentPomFile(pomFile);
@@ -149,86 +156,84 @@ public final class PomUtils {
     // ---------------------------------------------------------------- editing
 
     /**
-     * Sets the pom's &lt;packaging&gt; to "pom" — Maven requires that of every parent pom.
+     * Sets the pom's &lt;packaging&gt; to "pom". Maven requires that of every parent pom.
      * The rest of the file keeps its formatting. Returns false if it already was "pom".
      */
-    public static boolean ensurePomPackaging(@NotNull File pomFile) throws IOException {
+    public static synchronized boolean ensurePomPackaging(@NotNull File pomFile) throws IOException {
         if ("pom".equals(readPackaging(pomFile))) {
             return false;
         }
         Path path = pomFile.toPath();
         String content = Files.readString(path, StandardCharsets.UTF_8);
+        String searchable = maskIgnoredMarkup(content);
 
         List<int[]> excluded = excludedRegions(content);
-        Matcher parentBlock = Pattern.compile("<parent>.*?</parent>", Pattern.DOTALL).matcher(content);
-        if (parentBlock.find()) {
+        Matcher parentBlock = elementBlockPattern("parent").matcher(searchable);
+        if (findOutside(parentBlock, excluded)) {
             excluded.add(new int[]{parentBlock.start(), parentBlock.end()});
         }
-        Matcher tag = Pattern.compile("<packaging>\\s*[^<]*\\s*</packaging>").matcher(content);
+        Matcher tag = elementValuePattern("packaging").matcher(searchable);
         while (tag.find()) {
             if (inExcludedRegion(excluded, tag.start())) {
                 continue;
             }
-            Files.writeString(path, content.substring(0, tag.start())
-                    + "<packaging>pom</packaging>" + content.substring(tag.end()), StandardCharsets.UTF_8);
+            writeAtomically(path, replaceElementBody(content, tag, "pom"));
             return true;
         }
         // No tag yet (Maven defaulted to jar): insert one, like setParentPom does.
-        Matcher modelVersion = Pattern.compile("<modelVersion>.*?</modelVersion>", Pattern.DOTALL).matcher(content);
+        Matcher modelVersion = elementBlockPattern("modelVersion").matcher(searchable);
         if (modelVersion.find()) {
+            String prefix = elementPrefixAt(searchable, "modelVersion", modelVersion.start());
             content = content.substring(0, modelVersion.end())
-                    + "\n    <packaging>pom</packaging>" + content.substring(modelVersion.end());
+                    + "\n    <" + prefix + "packaging>pom</" + prefix + "packaging>"
+                    + content.substring(modelVersion.end());
         } else {
-            int projectTag = content.indexOf("<project");
-            int open = projectTag < 0 ? -1 : content.indexOf('>', projectTag);
-            if (open < 0) {
+            Matcher projectTag = openTagWithPrefixPattern("project").matcher(searchable);
+            if (!projectTag.find()) {
                 throw new IOException("Invalid pom.xml: no <project> tag found");
             }
-            content = content.substring(0, open + 1)
-                    + "\n    <packaging>pom</packaging>" + content.substring(open + 1);
+            String prefix = projectTag.group(1) == null ? "" : projectTag.group(1);
+            content = content.substring(0, projectTag.end())
+                    + "\n    <" + prefix + "packaging>pom</" + prefix + "packaging>"
+                    + content.substring(projectTag.end());
         }
-        Files.writeString(path, content, StandardCharsets.UTF_8);
+        writeAtomically(path, content);
         return true;
     }
 
     /** Sets or replaces the &lt;parent&gt; block of the pom; the rest of the file keeps its formatting. */
-    public static void setParentPom(@NotNull File pomFile,
-                                    @NotNull PomInfo parent,
-                                    @Nullable File parentPomFile) throws IOException {
+    public static synchronized void setParentPom(@NotNull File pomFile,
+                                                 @NotNull PomInfo parent,
+                                                 @Nullable File parentPomFile) throws IOException {
         Path path = pomFile.toPath();
         String content = Files.readString(path, StandardCharsets.UTF_8);
+        String searchable = maskIgnoredMarkup(content);
+        List<int[]> excluded = excludedRegions(content);
 
-        StringBuilder sb = new StringBuilder();
-        sb.append("<parent>\n");
-        sb.append("        <groupId>").append(escapeXml(parent.groupId())).append("</groupId>\n");
-        sb.append("        <artifactId>").append(escapeXml(parent.artifactId())).append("</artifactId>\n");
-        sb.append("        <version>").append(escapeXml(parent.version())).append("</version>\n");
-        if (parentPomFile != null) {
-            sb.append("        <relativePath>")
-                    .append(escapeXml(relativize(pomFile.getParentFile(), parentPomFile)))
-                    .append("</relativePath>\n");
-        }
-        sb.append("    </parent>");
-        String block = sb.toString();
-
-        Matcher existing = Pattern.compile("<parent>.*?</parent>", Pattern.DOTALL).matcher(content);
-        if (existing.find()) {
+        Matcher existing = elementBlockPattern("parent").matcher(searchable);
+        if (findOutside(existing, excluded)) {
+            String prefix = elementPrefixAt(searchable, "parent", existing.start());
+            String block = parentXml(parent, parentPomFile, pomFile.getParentFile(), prefix);
             content = content.substring(0, existing.start()) + block + content.substring(existing.end());
         } else {
-            Matcher modelVersion = Pattern.compile("<modelVersion>.*?</modelVersion>", Pattern.DOTALL).matcher(content);
+            Matcher modelVersion = elementBlockPattern("modelVersion").matcher(searchable);
             if (modelVersion.find()) {
+                String prefix = elementPrefixAt(searchable, "modelVersion", modelVersion.start());
+                String block = parentXml(parent, parentPomFile, pomFile.getParentFile(), prefix);
                 content = content.substring(0, modelVersion.end())
                         + "\n\n    " + block + content.substring(modelVersion.end());
             } else {
-                int projectTag = content.indexOf("<project");
-                int open = projectTag < 0 ? -1 : content.indexOf('>', projectTag);
-                if (open < 0) {
+                Matcher projectTag = openTagWithPrefixPattern("project").matcher(searchable);
+                if (!projectTag.find()) {
                     throw new IOException("Invalid pom.xml: no <project> tag found");
                 }
-                content = content.substring(0, open + 1) + "\n    " + block + content.substring(open + 1);
+                String prefix = projectTag.group(1) == null ? "" : projectTag.group(1);
+                String block = parentXml(parent, parentPomFile, pomFile.getParentFile(), prefix);
+                content = content.substring(0, projectTag.end())
+                        + "\n    " + block + content.substring(projectTag.end());
             }
         }
-        Files.writeString(path, content, StandardCharsets.UTF_8);
+        writeAtomically(path, content);
     }
 
     /**
@@ -236,70 +241,109 @@ public final class PomUtils {
      * ${property}, the property value is updated instead. If the dependency has
      * no version tag, one is inserted.
      */
-    public static void setDependencyVersion(@NotNull File pomFile,
-                                            @NotNull String groupId,
-                                            @NotNull String artifactId,
-                                            @NotNull String newVersion) throws IOException {
+    public static synchronized void setDependencyVersion(@NotNull File pomFile,
+                                                         @NotNull String groupId,
+                                                         @NotNull String artifactId,
+                                                         @NotNull String newVersion) throws IOException {
+        setDependencyVersionInternal(pomFile, new Dependency(groupId, artifactId, null), newVersion, false);
+    }
+
+    /** Sets exactly this dependency, including its Maven type and classifier identity. */
+    public static synchronized void setDependencyVersion(@NotNull File pomFile,
+                                                         @NotNull Dependency dependency,
+                                                         @NotNull String newVersion) throws IOException {
+        setDependencyVersionInternal(pomFile, dependency, newVersion, true);
+    }
+
+    private static void setDependencyVersionInternal(@NotNull File pomFile,
+                                                     @NotNull Dependency dependency,
+                                                     @NotNull String newVersion,
+                                                     boolean verifyExpectedVersion) throws IOException {
+        if (verifyExpectedVersion) {
+            Dependency current = readDependencies(pomFile).stream()
+                    .filter(candidate -> candidate.getKey().equals(dependency.getKey()))
+                    .findFirst().orElse(null);
+            if (current == null) {
+                throw new IOException("Dependency " + dependency.getKey() + " is no longer in " + pomFile.getName());
+            }
+            if (!current.getVersion().equals(dependency.getVersion())) {
+                throw new IOException("Dependency " + dependency.getKey() + " changed on disk from "
+                        + dependency.getVersion() + " to " + current.getVersion() + "; reload and try again.");
+            }
+        }
         Path path = pomFile.toPath();
         String content = Files.readString(path, StandardCharsets.UTF_8);
+        String searchable = maskIgnoredMarkup(content);
 
         List<int[]> excluded = excludedRegions(content);
-        Matcher block = Pattern.compile("<dependency>(.*?)</dependency>", Pattern.DOTALL).matcher(content);
+        Matcher block = elementBlockPattern("dependency").matcher(searchable);
         while (block.find()) {
             if (inExcludedRegion(excluded, block.start())) {
                 continue; // dependencyManagement / profiles declare, they are not the project's dependencies
             }
-            String body = block.group(1);
-            if (!containsTag(body, "groupId", groupId) || !containsTag(body, "artifactId", artifactId)) {
+            String body = content.substring(block.start(1), block.end(1));
+            String searchableBody = searchable.substring(block.start(1), block.end(1));
+            if (!matchesDependency(searchableBody, dependency)) {
                 continue;
             }
-            Matcher versionTag = Pattern.compile("<version>\\s*(.*?)\\s*</version>", Pattern.DOTALL).matcher(body);
+            Matcher versionTag = elementBlockPattern("version").matcher(searchableBody);
             String newBody;
             if (versionTag.find()) {
-                String raw = versionTag.group(1);
+                String raw = body.substring(versionTag.start(1), versionTag.end(1)).trim();
                 if (raw.startsWith("${") && raw.endsWith("}")) {
                     String property = raw.substring(2, raw.length() - 1);
-                    String updated = replacePropertyValue(content, property, newVersion);
+                    // A property can intentionally control several dependencies. Updating it
+                    // would make a one-row action silently rewrite all of them, so preserve the
+                    // property only when this dependency is its sole direct consumer.
+                    String updated = countPropertyReferences(content, property) == 1
+                            ? replacePropertyValue(content, property, newVersion) : null;
                     if (updated != null) {
-                        Files.writeString(path, updated, StandardCharsets.UTF_8);
+                        writeAtomically(path, updated);
                         return;
                     }
                 }
-                newBody = body.substring(0, versionTag.start())
-                        + "<version>" + escapeXml(newVersion) + "</version>"
-                        + body.substring(versionTag.end());
+                newBody = replaceElementBody(body, versionTag, newVersion);
             } else {
-                int idx = body.indexOf("</artifactId>");
-                if (idx < 0) {
+                Matcher artifactClose = closeTagWithPrefixPattern("artifactId").matcher(searchableBody);
+                if (!artifactClose.find()) {
                     continue;
                 }
-                int end = idx + "</artifactId>".length();
+                int end = artifactClose.end();
+                String prefix = artifactClose.group(1) == null ? "" : artifactClose.group(1);
                 newBody = body.substring(0, end)
-                        + "\n            <version>" + escapeXml(newVersion) + "</version>"
+                        + "\n            <" + prefix + "version>" + escapeXml(newVersion)
+                        + "</" + prefix + "version>"
                         + body.substring(end);
             }
             String updatedContent = content.substring(0, block.start(1)) + newBody + content.substring(block.end(1));
-            Files.writeString(path, updatedContent, StandardCharsets.UTF_8);
+            writeAtomically(path, updatedContent);
             return;
         }
-        throw new IOException("Dependency " + groupId + ":" + artifactId + " not found in " + pomFile.getName());
+        throw new IOException("Dependency " + dependency.getKey() + " not found in " + pomFile.getName());
     }
 
     /** Removes the dependency's whole &lt;dependency&gt; block; the rest of the file keeps its formatting. */
     public static void removeDependency(@NotNull File pomFile,
                                         @NotNull String groupId,
                                         @NotNull String artifactId) throws IOException {
+        removeDependency(pomFile, new Dependency(groupId, artifactId, null));
+    }
+
+    /** Removes exactly this dependency, including its Maven type and classifier identity. */
+    public static synchronized void removeDependency(@NotNull File pomFile,
+                                                     @NotNull Dependency dependency) throws IOException {
         Path path = pomFile.toPath();
         String content = Files.readString(path, StandardCharsets.UTF_8);
+        String searchable = maskIgnoredMarkup(content);
 
         List<int[]> excluded = excludedRegions(content);
-        Matcher block = Pattern.compile("<dependency>(.*?)</dependency>", Pattern.DOTALL).matcher(content);
+        Matcher block = elementBlockPattern("dependency").matcher(searchable);
         while (block.find()) {
             if (inExcludedRegion(excluded, block.start())) {
                 continue; // dependencyManagement / profiles declare, they are not the project's dependencies
             }
-            String body = block.group(1);
-            if (!containsTag(body, "groupId", groupId) || !containsTag(body, "artifactId", artifactId)) {
+            String searchableBody = searchable.substring(block.start(1), block.end(1));
+            if (!matchesDependency(searchableBody, dependency)) {
                 continue;
             }
             int start = block.start();
@@ -310,17 +354,26 @@ public final class PomUtils {
             if (start > 0 && content.charAt(start - 1) == '\n') {
                 start--;
             }
-            Files.writeString(path, content.substring(0, start) + content.substring(block.end()),
-                    StandardCharsets.UTF_8);
+            writeAtomically(path, content.substring(0, start) + content.substring(block.end()));
             return;
         }
-        throw new IOException("Dependency " + groupId + ":" + artifactId + " not found in " + pomFile.getName());
+        throw new IOException("Dependency " + dependency.getKey() + " not found in " + pomFile.getName());
     }
 
     /** Appends the given dependencies to the top-level &lt;dependencies&gt; section (creating it if needed). */
-    public static void addDependencies(@NotNull File pomFile, @NotNull List<Dependency> dependencies) throws IOException {
+    public static synchronized void addDependencies(@NotNull File pomFile,
+                                                    @NotNull List<Dependency> dependencies) throws IOException {
         if (dependencies.isEmpty()) {
             return;
+        }
+        Set<String> present = new java.util.HashSet<>();
+        for (Dependency existing : readDependencies(pomFile)) {
+            present.add(existing.getKey());
+        }
+        for (Dependency dependency : dependencies) {
+            if (!present.add(dependency.getKey())) {
+                throw new IOException("Dependency " + dependency.getKey() + " is already in " + pomFile.getName());
+            }
         }
         Path path = pomFile.toPath();
         String content = Files.readString(path, StandardCharsets.UTF_8);
@@ -339,7 +392,7 @@ public final class PomUtils {
             }
             content = content.substring(0, insertAt) + snippet + content.substring(insertAt);
         } else {
-            int projectClose = content.lastIndexOf("</project>");
+            int projectClose = lastMatchStart(closeTagPattern("project"), maskIgnoredMarkup(content));
             if (projectClose < 0) {
                 throw new IOException("Invalid pom.xml: no </project> tag found");
             }
@@ -347,17 +400,17 @@ public final class PomUtils {
                     + "    <dependencies>\n" + snippet + "    </dependencies>\n\n"
                     + content.substring(projectClose);
         }
-        Files.writeString(path, content, StandardCharsets.UTF_8);
+        writeAtomically(path, content);
     }
 
     /** Creates a brand-new pom.xml. {@code parent} and {@code parentPomFile} may be null. */
-    public static void createPom(@NotNull File targetPomFile,
-                                 @NotNull String groupId,
-                                 @NotNull String artifactId,
-                                 @NotNull String version,
-                                 @Nullable PomInfo parent,
-                                 @Nullable File parentPomFile,
-                                 @NotNull List<Dependency> dependencies) throws IOException {
+    public static synchronized void createPom(@NotNull File targetPomFile,
+                                              @NotNull String groupId,
+                                              @NotNull String artifactId,
+                                              @NotNull String version,
+                                              @Nullable PomInfo parent,
+                                              @Nullable File parentPomFile,
+                                              @NotNull List<Dependency> dependencies) throws IOException {
         StringBuilder sb = new StringBuilder();
         sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
         sb.append("<project xmlns=\"http://maven.apache.org/POM/4.0.0\"\n");
@@ -397,7 +450,7 @@ public final class PomUtils {
         }
 
         sb.append("</project>\n");
-        Files.writeString(targetPomFile.toPath(), sb.toString(), StandardCharsets.UTF_8);
+        writeNewAtomically(targetPomFile.toPath(), sb.toString());
     }
 
     /**
@@ -406,11 +459,12 @@ public final class PomUtils {
      */
     public static @NotNull List<Dependency> parsePastedDependencies(@NotNull String text) {
         List<Dependency> result = new ArrayList<>();
-        Matcher block = Pattern.compile("<dependency>(.*?)</dependency>", Pattern.DOTALL).matcher(text);
+        String searchable = maskIgnoredMarkup(text);
+        Matcher block = elementBlockPattern("dependency").matcher(searchable);
         boolean foundXml = false;
         while (block.find()) {
             foundXml = true;
-            String body = block.group(1);
+            String body = searchable.substring(block.start(1), block.end(1));
             String groupId = firstTagValue(body, "groupId");
             String artifactId = firstTagValue(body, "artifactId");
             String version = firstTagValue(body, "version");
@@ -434,6 +488,84 @@ public final class PomUtils {
 
     // ---------------------------------------------------------------- helpers
 
+    private static final String OPTIONAL_XML_PREFIX = "(?:[A-Za-z_][A-Za-z0-9_.-]*:)?";
+    private static final Pattern IGNORED_MARKUP =
+            Pattern.compile("<!--.*?-->|<!\\[CDATA\\[.*?]]>", Pattern.DOTALL);
+
+    private static @NotNull String openTagRegex(@NotNull String tag) {
+        return "<" + OPTIONAL_XML_PREFIX + Pattern.quote(tag) + "(?=\\s|>)\\s*[^>]*>";
+    }
+
+    private static @NotNull String closeTagRegex(@NotNull String tag) {
+        return "</" + OPTIONAL_XML_PREFIX + Pattern.quote(tag) + "\\s*>";
+    }
+
+    /** Capturing group 1 is the element body. */
+    private static @NotNull Pattern elementBlockPattern(@NotNull String tag) {
+        return Pattern.compile(openTagRegex(tag) + "(.*?)" + closeTagRegex(tag), Pattern.DOTALL);
+    }
+
+    private static @NotNull Pattern elementValuePattern(@NotNull String tag) {
+        return elementBlockPattern(tag);
+    }
+
+    private static @NotNull Pattern closeTagPattern(@NotNull String tag) {
+        return Pattern.compile(closeTagRegex(tag));
+    }
+
+    private static @NotNull Pattern closeTagWithPrefixPattern(@NotNull String tag) {
+        return Pattern.compile("</(" + OPTIONAL_XML_PREFIX + ")" + Pattern.quote(tag) + "\\s*>");
+    }
+
+    private static @NotNull Pattern openTagWithPrefixPattern(@NotNull String tag) {
+        return Pattern.compile("<(" + OPTIONAL_XML_PREFIX + ")" + Pattern.quote(tag)
+                + "(?=\\s|>)\\s*[^>]*>");
+    }
+
+    private static @NotNull String elementPrefixAt(@NotNull String searchable,
+                                                   @NotNull String tag,
+                                                   int start) {
+        Matcher matcher = openTagWithPrefixPattern(tag).matcher(searchable);
+        matcher.region(start, searchable.length());
+        if (matcher.lookingAt()) {
+            return matcher.group(1) == null ? "" : matcher.group(1);
+        }
+        return "";
+    }
+
+    private static int lastMatchStart(@NotNull Pattern pattern, @NotNull String content) {
+        Matcher matcher = pattern.matcher(content);
+        int result = -1;
+        while (matcher.find()) {
+            result = matcher.start();
+        }
+        return result;
+    }
+
+    private static @NotNull String parentXml(@NotNull PomInfo parent,
+                                             @Nullable File parentPomFile,
+                                             @NotNull File childDirectory,
+                                             @NotNull String prefix) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("<").append(prefix).append("parent>\n");
+        sb.append("        <").append(prefix).append("groupId>")
+                .append(escapeXml(parent.groupId()))
+                .append("</").append(prefix).append("groupId>\n");
+        sb.append("        <").append(prefix).append("artifactId>")
+                .append(escapeXml(parent.artifactId()))
+                .append("</").append(prefix).append("artifactId>\n");
+        sb.append("        <").append(prefix).append("version>")
+                .append(escapeXml(parent.version()))
+                .append("</").append(prefix).append("version>\n");
+        if (parentPomFile != null) {
+            sb.append("        <").append(prefix).append("relativePath>")
+                    .append(escapeXml(relativize(childDirectory, parentPomFile)))
+                    .append("</").append(prefix).append("relativePath>\n");
+        }
+        sb.append("    </").append(prefix).append("parent>");
+        return sb.toString();
+    }
+
     private static @NotNull String dependencyXml(@NotNull Dependency d, @NotNull String indent) {
         StringBuilder sb = new StringBuilder();
         sb.append(indent).append("<dependency>\n");
@@ -441,6 +573,13 @@ public final class PomUtils {
         sb.append(indent).append("    <artifactId>").append(escapeXml(d.getArtifactId())).append("</artifactId>\n");
         if (!d.getVersion().isEmpty()) {
             sb.append(indent).append("    <version>").append(escapeXml(d.getVersion())).append("</version>\n");
+        }
+        if (!d.getType().isEmpty()) {
+            sb.append(indent).append("    <type>").append(escapeXml(d.getType())).append("</type>\n");
+        }
+        if (!d.getClassifier().isEmpty()) {
+            sb.append(indent).append("    <classifier>").append(escapeXml(d.getClassifier()))
+                    .append("</classifier>\n");
         }
         sb.append(indent).append("</dependency>\n");
         return sb.toString();
@@ -451,9 +590,14 @@ public final class PomUtils {
      * project: {@code <dependencyManagement>} and {@code <profiles>}. Edits must skip these.
      */
     private static @NotNull List<int[]> excludedRegions(@NotNull String content) {
-        List<int[]> regions = new ArrayList<>();
-        for (String tag : new String[]{"dependencyManagement", "profiles"}) {
-            Matcher m = Pattern.compile("<" + tag + ">.*?</" + tag + ">", Pattern.DOTALL).matcher(content);
+        List<int[]> regions = ignoredMarkupRegions(content);
+        String searchable = maskIgnoredMarkup(content);
+        // <build> and <reporting> matter as much as the other two: a <plugin> may carry its own
+        // <dependencies>, and those blocks look identical to a project dependency in raw text.
+        // Without this, editing a dependency that a plugin also declares hits whichever block
+        // comes first in the file, updating, or even deleting, the plugin's copy instead.
+        for (String tag : new String[]{"dependencyManagement", "profiles", "build", "reporting"}) {
+            Matcher m = elementBlockPattern(tag).matcher(searchable);
             while (m.find()) {
                 regions.add(new int[]{m.start(), m.end()});
             }
@@ -470,30 +614,90 @@ public final class PomUtils {
         return false;
     }
 
+    private static boolean findOutside(@NotNull Matcher matcher, @NotNull List<int[]> regions) {
+        while (matcher.find()) {
+            if (!inExcludedRegion(regions, matcher.start())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static @NotNull List<int[]> ignoredMarkupRegions(@NotNull String content) {
+        List<int[]> regions = new ArrayList<>();
+        Matcher matcher = IGNORED_MARKUP.matcher(content);
+        while (matcher.find()) {
+            regions.add(new int[]{matcher.start(), matcher.end()});
+        }
+        return regions;
+    }
+
+    /**
+     * Blanks comments and CDATA without moving offsets. Regex-based targeted edits can then
+     * locate real XML tags while all replacements are still applied to the original text.
+     */
+    private static @NotNull String maskIgnoredMarkup(@NotNull String content) {
+        char[] masked = content.toCharArray();
+        for (int[] region : ignoredMarkupRegions(content)) {
+            for (int i = region[0]; i < region[1]; i++) {
+                if (masked[i] != '\n' && masked[i] != '\r') {
+                    masked[i] = ' ';
+                }
+            }
+        }
+        return new String(masked);
+    }
+
     /** Index of the top-level {@code </dependencies>} tag, or -1. */
     private static int findTopLevelDependenciesClose(@NotNull String content) {
         List<int[]> excluded = excludedRegions(content);
-        int searchFrom = 0;
-        while (true) {
-            int close = content.indexOf("</dependencies>", searchFrom);
-            if (close < 0) {
-                return -1;
-            }
+        Matcher closes = closeTagPattern("dependencies").matcher(maskIgnoredMarkup(content));
+        while (closes.find()) {
+            int close = closes.start();
             if (inExcludedRegion(excluded, close)) {
-                searchFrom = close + 1;
                 continue;
             }
             return close;
         }
+        return -1;
     }
 
     private static boolean containsTag(@NotNull String body, @NotNull String tag, @NotNull String value) {
-        Pattern p = Pattern.compile("<" + tag + ">\\s*" + Pattern.quote(escapeXml(value)) + "\\s*</" + tag + ">");
+        Pattern p = Pattern.compile(openTagRegex(tag) + "\\s*" + Pattern.quote(escapeXml(value))
+                + "\\s*" + closeTagRegex(tag), Pattern.DOTALL);
         return p.matcher(body).find();
     }
 
+    private static boolean matchesDependency(@NotNull String body, @NotNull Dependency dependency) {
+        if (!containsTag(body, "groupId", dependency.getGroupId())
+                || !containsTag(body, "artifactId", dependency.getArtifactId())) {
+            return false;
+        }
+        String bodyType = firstTagValue(body, "type");
+        String wantedType = dependency.getType();
+        if (bodyType == null || bodyType.isBlank()) {
+            bodyType = "jar";
+        }
+        if (wantedType.isBlank()) {
+            wantedType = "jar";
+        }
+        String bodyClassifier = firstTagValue(body, "classifier");
+        return wantedType.equals(bodyType)
+                && dependency.getClassifier().equals(bodyClassifier == null ? "" : bodyClassifier);
+    }
+
+    /** Number of references anywhere in the pom; comments make this conservative, never destructive. */
+    private static int countPropertyReferences(@NotNull String content, @NotNull String property) {
+        Matcher reference = Pattern.compile(Pattern.quote("${" + property + "}")).matcher(content);
+        int count = 0;
+        while (reference.find()) {
+            count++;
+        }
+        return count;
+    }
+
     private static @Nullable String firstTagValue(@NotNull String body, @NotNull String tag) {
-        Matcher m = Pattern.compile("<" + tag + ">\\s*(.*?)\\s*</" + tag + ">", Pattern.DOTALL).matcher(body);
+        Matcher m = elementBlockPattern(tag).matcher(body);
         return m.find() ? unescapeXml(m.group(1)) : null;
     }
 
@@ -501,17 +705,35 @@ public final class PomUtils {
                                                          @NotNull String property,
                                                          @NotNull String newValue) {
         List<int[]> excluded = excludedRegions(content);
-        Pattern p = Pattern.compile("<" + Pattern.quote(property) + ">\\s*[^<]*\\s*</" + Pattern.quote(property) + ">");
-        Matcher m = p.matcher(content);
+        Matcher m = elementBlockPattern(property).matcher(maskIgnoredMarkup(content));
         while (m.find()) {
             if (inExcludedRegion(excluded, m.start())) {
                 continue; // a profile's <properties> does not define the active version
             }
-            return content.substring(0, m.start())
-                    + "<" + property + ">" + escapeXml(newValue) + "</" + property + ">"
-                    + content.substring(m.end());
+            return replaceElementBody(content, m, newValue);
         }
         return null;
+    }
+
+    /** Replaces only an element's text, keeping its prefix, attributes and surrounding whitespace. */
+    private static @NotNull String replaceElementBody(@NotNull String content,
+                                                       @NotNull Matcher element,
+                                                       @NotNull String newValue) {
+        String oldBody = content.substring(element.start(1), element.end(1));
+        int first = 0;
+        while (first < oldBody.length() && Character.isWhitespace(oldBody.charAt(first))) {
+            first++;
+        }
+        int last = oldBody.length();
+        while (last > first && Character.isWhitespace(oldBody.charAt(last - 1))) {
+            last--;
+        }
+        String replacement = oldBody.substring(0, first)
+                + escapeXml(newValue)
+                + oldBody.substring(last);
+        return content.substring(0, element.start(1))
+                + replacement
+                + content.substring(element.end(1));
     }
 
     /**
@@ -542,6 +764,46 @@ public final class PomUtils {
         }
     }
 
+    /**
+     * Replaces an existing pom atomically, retaining its POSIX permissions where supported.
+     * Every public writer is synchronized as well, so two Maven Assist tasks cannot interleave
+     * a read/modify/write sequence.
+     */
+    private static void writeAtomically(@NotNull Path path, @NotNull String content) throws IOException {
+        Path absolute = path.toAbsolutePath().normalize();
+        Path parent = absolute.getParent();
+        if (parent == null || !Files.isRegularFile(absolute)) {
+            throw new IOException("File no longer exists: " + absolute);
+        }
+        Set<PosixFilePermission> permissions = null;
+        try {
+            permissions = Files.getPosixFilePermissions(absolute);
+        } catch (UnsupportedOperationException ignored) {
+            // Windows and other non-POSIX file systems.
+        }
+        Path temp = Files.createTempFile(parent, "." + absolute.getFileName(), ".mavenassist.tmp");
+        try {
+            Files.writeString(temp, content, StandardCharsets.UTF_8,
+                    StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
+            if (permissions != null) {
+                Files.setPosixFilePermissions(temp, permissions);
+            }
+            try {
+                Files.move(temp, absolute, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            } catch (AtomicMoveNotSupportedException e) {
+                Files.move(temp, absolute, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } finally {
+            Files.deleteIfExists(temp);
+        }
+    }
+
+    /** Creates a new pom without any overwrite window. */
+    private static void writeNewAtomically(@NotNull Path path, @NotNull String content) throws IOException {
+        Files.writeString(path.toAbsolutePath().normalize(), content, StandardCharsets.UTF_8,
+                StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
+    }
+
     private static @NotNull Element parse(@NotNull File pomFile) throws IOException {
         try {
             DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
@@ -551,9 +813,11 @@ public final class PomUtils {
             factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
             factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
             factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+            factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "");
+            factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
             factory.setXIncludeAware(false);
             factory.setExpandEntityReferences(false);
-            factory.setNamespaceAware(false);
+            factory.setNamespaceAware(true);
             Document doc = factory.newDocumentBuilder().parse(pomFile);
             return doc.getDocumentElement();
         } catch (IOException e) {
@@ -571,7 +835,7 @@ public final class PomUtils {
             for (int i = 0; i < children.getLength(); i++) {
                 Node node = children.item(i);
                 if (node instanceof Element el) {
-                    result.put(el.getTagName(), el.getTextContent().trim());
+                    result.put(elementName(el), el.getTextContent().trim());
                 }
             }
         }
@@ -582,7 +846,7 @@ public final class PomUtils {
         NodeList children = parent.getChildNodes();
         for (int i = 0; i < children.getLength(); i++) {
             Node node = children.item(i);
-            if (node instanceof Element el && el.getTagName().equals(name)) {
+            if (node instanceof Element el && elementName(el).equals(name)) {
                 return el;
             }
         }
@@ -594,7 +858,7 @@ public final class PomUtils {
         NodeList children = parent.getChildNodes();
         for (int i = 0; i < children.getLength(); i++) {
             Node node = children.item(i);
-            if (node instanceof Element el && el.getTagName().equals(name)) {
+            if (node instanceof Element el && elementName(el).equals(name)) {
                 result.add(el);
             }
         }
@@ -604,5 +868,10 @@ public final class PomUtils {
     private static @Nullable String childText(@NotNull Element parent, @NotNull String name) {
         Element el = childElement(parent, name);
         return el == null ? null : el.getTextContent().trim();
+    }
+
+    private static @NotNull String elementName(@NotNull Element element) {
+        String localName = element.getLocalName();
+        return localName == null ? element.getTagName() : localName;
     }
 }

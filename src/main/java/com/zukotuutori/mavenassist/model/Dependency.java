@@ -6,7 +6,7 @@ import org.jetbrains.annotations.Nullable;
 import java.util.Objects;
 
 /**
- * A Maven dependency (groupId / artifactId / version) with an optional display name.
+ * A Maven dependency with an optional display name.
  * The version may be empty, meaning "unknown / resolve the newest one when used".
  */
 public final class Dependency {
@@ -15,6 +15,8 @@ public final class Dependency {
     private final String artifactId;
     private final String version;
     private final String name;
+    private final String type;
+    private final String classifier;
 
     public Dependency(@NotNull String groupId, @NotNull String artifactId, @Nullable String version) {
         this(groupId, artifactId, version, null);
@@ -22,10 +24,18 @@ public final class Dependency {
 
     public Dependency(@NotNull String groupId, @NotNull String artifactId,
                       @Nullable String version, @Nullable String name) {
+        this(groupId, artifactId, version, name, null, null);
+    }
+
+    public Dependency(@NotNull String groupId, @NotNull String artifactId,
+                      @Nullable String version, @Nullable String name,
+                      @Nullable String type, @Nullable String classifier) {
         this.groupId = groupId.trim();
         this.artifactId = artifactId.trim();
         this.version = version == null ? "" : version.trim();
         this.name = name == null ? "" : name.trim();
+        this.type = type == null ? "" : type.trim();
+        this.classifier = classifier == null ? "" : classifier.trim();
     }
 
     public @NotNull String getGroupId() {
@@ -46,9 +56,26 @@ public final class Dependency {
         return name;
     }
 
-    /** groupId:artifactId — identifies a dependency regardless of version. */
+    /** May be empty, which is Maven's default {@code jar} type. */
+    public @NotNull String getType() {
+        return type;
+    }
+
+    /** May be empty. */
+    public @NotNull String getClassifier() {
+        return classifier;
+    }
+
+    /**
+     * Stable dependency identity. Maven distinguishes dependencies by group id, artifact id,
+     * effective type and classifier; omitting the default jar/empty pair keeps old stored keys
+     * compatible.
+     */
     public @NotNull String getKey() {
-        return groupId + ":" + artifactId;
+        if ((type.isEmpty() || "jar".equals(type)) && classifier.isEmpty()) {
+            return groupId + ":" + artifactId;
+        }
+        return groupId + ":" + artifactId + ":" + effectiveType() + ":" + classifier;
     }
 
     public @NotNull String toGav() {
@@ -56,7 +83,7 @@ public final class Dependency {
     }
 
     public @NotNull Dependency withVersion(@Nullable String newVersion) {
-        return new Dependency(groupId, artifactId, newVersion, name);
+        return new Dependency(groupId, artifactId, newVersion, name, type, classifier);
     }
 
     /** Parses "groupId:artifactId" or "groupId:artifactId:version". */
@@ -70,7 +97,11 @@ public final class Dependency {
 
     public @NotNull String getDisplayName() {
         String coordinates = version.isEmpty() ? getKey() : getKey() + "  (" + version + ")";
-        return name.isEmpty() ? coordinates : name + "  —  " + coordinates;
+        return name.isEmpty() ? coordinates : name + " - " + coordinates;
+    }
+
+    private @NotNull String effectiveType() {
+        return type.isEmpty() ? "jar" : type;
     }
 
     @Override
@@ -82,11 +113,14 @@ public final class Dependency {
     public boolean equals(Object o) {
         if (this == o) return true;
         if (!(o instanceof Dependency that)) return false;
-        return groupId.equals(that.groupId) && artifactId.equals(that.artifactId);
+        return groupId.equals(that.groupId)
+                && artifactId.equals(that.artifactId)
+                && effectiveType().equals(that.effectiveType())
+                && classifier.equals(that.classifier);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(groupId, artifactId);
+        return Objects.hash(groupId, artifactId, effectiveType(), classifier);
     }
 }

@@ -1,10 +1,10 @@
 plugins {
     id("java")
-    id("org.jetbrains.intellij.platform") version "2.17.0"
+    id("org.jetbrains.intellij.platform") version "2.18.1"
 }
 
 group = "com.zukotuutori"
-version = "1.0.1"
+version = "2.0.0"
 
 repositories {
     mavenCentral()
@@ -14,16 +14,27 @@ repositories {
 }
 
 dependencies {
+    testImplementation("org.junit.jupiter:junit-jupiter:6.1.2")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher:6.1.2")
+    testRuntimeOnly("junit:junit:4.13.2")
+
     intellijPlatform {
         // Resolve the IntelliJ Platform SDK from the marketplace so anyone can build.
         // To build against a locally installed IDE instead, replace with:
         //   local("/Applications/IntelliJ IDEA.app")
-        create("IC", "2025.2")
+        create("IC", "2025.1")
     }
 }
 
 intellijPlatform {
     buildSearchableOptions = false
+
+    pluginVerification {
+        ides {
+            // The compile target is also the declared minimum supported IDE.
+            current()
+        }
+    }
 
     pluginConfiguration {
         ideaVersion {
@@ -37,4 +48,8 @@ java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(21)
     }
+}
+
+tasks.test {
+    useJUnitPlatform()
 }

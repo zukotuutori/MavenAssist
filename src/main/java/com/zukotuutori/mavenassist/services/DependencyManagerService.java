@@ -3,6 +3,7 @@ package com.zukotuutori.mavenassist.services;
 import com.zukotuutori.mavenassist.model.Dependency;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.components.PersistentStateComponent;
+import com.intellij.openapi.components.RoamingType;
 import com.intellij.openapi.components.Service;
 import com.intellij.openapi.components.State;
 import com.intellij.openapi.components.Storage;
@@ -22,7 +23,8 @@ import java.util.Set;
  * display name) that are persisted permanently (application level, survives IDE restarts).
  */
 @Service
-@State(name = "MavenAssistDependencyManager", storages = @Storage("mavenAssistDependencies.xml"))
+@State(name = "MavenAssistDependencyManager",
+        storages = @Storage(value = "mavenAssistDependencies.xml", roamingType = RoamingType.DISABLED))
 public final class DependencyManagerService implements PersistentStateComponent<DependencyManagerService.State> {
 
     /** One persisted catalog entry. Public fields for XML serialization. */
@@ -34,9 +36,9 @@ public final class DependencyManagerService implements PersistentStateComponent<
     }
 
     public static class State {
-        /** Keys ("groupId:artifactId") the user deleted from the catalog — hides built-in defaults too. */
+        /** Keys ("groupId:artifactId") the user deleted from the catalog. This hides built-in defaults too. */
         public List<String> removedKeys = new ArrayList<>();
-        /** Legacy format ("groupId:artifactId:version" strings) — migrated to {@link #customEntries} on load. */
+        /** Legacy format ("groupId:artifactId:version" strings), migrated to {@link #customEntries} on load. */
         public List<String> customDependencies = new ArrayList<>();
         public List<Entry> customEntries = new ArrayList<>();
     }
@@ -45,21 +47,21 @@ public final class DependencyManagerService implements PersistentStateComponent<
             new Dependency("org.junit.jupiter", "junit-jupiter", "5.10.2", "JUnit Jupiter (JUnit 5)"),
             new Dependency("junit", "junit", "4.13.2", "JUnit 4"),
             new Dependency("org.mockito", "mockito-core", "5.12.0", "Mockito"),
-            new Dependency("org.assertj", "assertj-core", "3.26.0", "AssertJ"),
+            new Dependency("org.assertj", "assertj-core", "3.27.7", "AssertJ"),
             new Dependency("com.google.guava", "guava", "33.2.0-jre", "Guava"),
-            new Dependency("org.apache.commons", "commons-lang3", "3.14.0", "Apache Commons Lang"),
+            new Dependency("org.apache.commons", "commons-lang3", "3.18.0", "Apache Commons Lang"),
             new Dependency("commons-io", "commons-io", "2.16.1", "Apache Commons IO"),
-            new Dependency("com.fasterxml.jackson.core", "jackson-databind", "2.17.1", "Jackson Databind"),
+            new Dependency("com.fasterxml.jackson.core", "jackson-databind", "2.18.9", "Jackson Databind"),
             new Dependency("com.google.code.gson", "gson", "2.11.0", "Gson"),
             new Dependency("org.slf4j", "slf4j-api", "2.0.13", "SLF4J API"),
             new Dependency("ch.qos.logback", "logback-classic", "1.5.6", "Logback Classic"),
-            new Dependency("org.apache.logging.log4j", "log4j-core", "2.23.1", "Log4j Core"),
+            new Dependency("org.apache.logging.log4j", "log4j-core", "2.25.4", "Log4j Core"),
             new Dependency("org.projectlombok", "lombok", "1.18.32", "Lombok"),
             new Dependency("org.springframework.boot", "spring-boot-starter-web", "3.3.0", "Spring Boot Web"),
             new Dependency("org.springframework.boot", "spring-boot-starter-data-jpa", "3.3.0", "Spring Boot Data JPA"),
             new Dependency("org.springframework.boot", "spring-boot-starter-test", "3.3.0", "Spring Boot Test"),
             new Dependency("org.hibernate.orm", "hibernate-core", "6.5.2.Final", "Hibernate ORM"),
-            new Dependency("org.postgresql", "postgresql", "42.7.3", "PostgreSQL Driver"),
+            new Dependency("org.postgresql", "postgresql", "42.7.11", "PostgreSQL Driver"),
             new Dependency("com.mysql", "mysql-connector-j", "8.4.0", "MySQL Connector/J"),
             new Dependency("com.h2database", "h2", "2.2.224", "H2 Database"),
             new Dependency("com.squareup.okhttp3", "okhttp", "4.12.0", "OkHttp"),
@@ -140,7 +142,7 @@ public final class DependencyManagerService implements PersistentStateComponent<
 
     /**
      * Adds a dependency to the manager permanently. Returns false if the name is already
-     * used. The coordinates may duplicate an existing entry — only the name must be unique.
+     * used. The coordinates may duplicate an existing entry; only the name must be unique.
      * Deleted entries stay deleted; re-adding the same code creates a fresh entry.
      */
     public boolean addCustomDependency(@NotNull Dependency dependency) {

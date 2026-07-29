@@ -4,7 +4,6 @@ import com.zukotuutori.mavenassist.model.Dependency;
 import com.zukotuutori.mavenassist.services.DependencyManagerService;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.ui.SearchTextField;
-import com.intellij.ui.table.JBTable;
 import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -35,13 +34,13 @@ import java.util.function.Consumer;
 /**
  * Shared picker for "addable" dependencies (used by the Add Dependencies dialog and
  * the pom-creation view): searchable rows showing only a checkbox, the dependency's
- * <b>name</b> and a per-row <b>Show Details</b> button — everything else (coordinates,
+ * <b>name</b> and a per-row <b>Show Details</b> button. Everything else (coordinates,
  * versions) lives behind the details callback. Checked state survives filtering.
  *
  * <p>The pom-creation view enables an extra <b>Version</b> column whose button offers
  * "Newest version" (the default) or a custom version per dependency.</p>
  */
-class DependencyPickerTable extends JBTable {
+class DependencyPickerTable extends ThemedTable {
 
     private final int colCheck = 0;
     private final int colName = 1;
@@ -76,7 +75,6 @@ class DependencyPickerTable extends JBTable {
         this.colDetails = withVersionColumn ? 3 : 2;
         this.colDelete = withDeleteColumn ? colDetails + 1 : -1;
         setModel(model);
-        TablePills.modernize(this);
         getTableHeader().setReorderingAllowed(false);
         getColumnModel().getColumn(colCheck).setMaxWidth(JBUI.scale(30));
         if (withVersionColumn) {
@@ -198,6 +196,11 @@ class DependencyPickerTable extends JBTable {
     /** Back to "use the newest version". */
     void clearCustomVersion(@NotNull String dependencyKey) {
         customVersions.remove(dependencyKey);
+        model.fireTableDataChanged();
+    }
+
+    void clearCustomVersions() {
+        customVersions.clear();
         model.fireTableDataChanged();
     }
 
@@ -373,6 +376,8 @@ class DependencyPickerTable extends JBTable {
         public Component getTableCellEditorComponent(JTable table, Object value, boolean isSelected,
                                                      int row, int column) {
             editedRow = row;
+            // Editors live outside the component tree; re-install the UI so a theme switch reaches them.
+            button.updateUI();
             return button;
         }
 
@@ -391,7 +396,7 @@ class DependencyPickerTable extends JBTable {
         @Override
         public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected,
                                                        boolean hasFocus, int row, int column) {
-            setText(String.valueOf(value));
+            setText(UiText.html(value));
             return this;
         }
     }
@@ -414,7 +419,8 @@ class DependencyPickerTable extends JBTable {
         public Component getTableCellEditorComponent(JTable table, Object value, boolean isSelected,
                                                      int row, int column) {
             editedRow = row;
-            button.setText(String.valueOf(value));
+            button.updateUI();
+            button.setText(UiText.html(value));
             return button;
         }
 

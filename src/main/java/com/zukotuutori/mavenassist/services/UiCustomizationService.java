@@ -2,6 +2,7 @@ package com.zukotuutori.mavenassist.services;
 
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.components.PersistentStateComponent;
+import com.intellij.openapi.components.RoamingType;
 import com.intellij.openapi.components.Service;
 import com.intellij.openapi.components.State;
 import com.intellij.openapi.components.Storage;
@@ -18,7 +19,8 @@ import java.util.Map;
  * in the "Details" dialog. Saved at application level, so the choice survives IDE restarts.
  */
 @Service
-@State(name = "MavenAssistUiCustomization", storages = @Storage("mavenAssistUiCustomization.xml"))
+@State(name = "MavenAssistUiCustomization",
+        storages = @Storage(value = "mavenAssistUiCustomization.xml", roamingType = RoamingType.DISABLED))
 public final class UiCustomizationService implements PersistentStateComponent<UiCustomizationService.State> {
 
     /** Dependency fields whose visibility (table vs. details dialog) can be toggled. */
