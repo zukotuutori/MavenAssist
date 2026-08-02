@@ -35,5 +35,20 @@ build/
 .intellijPlatform/
 *.iml
 
+# Local assistant and machine-specific state
+.claude/
+.codex/
+local.properties
+
+# Local secrets and signing material
+.env
+.env.*
+!.env.example
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+
 # macOS
 .DS_Store

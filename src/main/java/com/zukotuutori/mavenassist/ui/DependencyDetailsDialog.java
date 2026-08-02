@@ -125,8 +125,15 @@ public class DependencyDetailsDialog extends DialogWrapper {
         if (custom.isShownInDetails(Field.AUTO_UPDATE)) {
             JBCheckBox autoUpdateCheck = new JBCheckBox("Auto update at the times selected under Customize",
                     AutoUpdateService.getInstance(project).isAutoUpdate(pom, dependency.getKey()));
-            autoUpdateCheck.addActionListener(e -> AutoUpdateService.getInstance(project)
-                    .setAutoUpdate(pom, dependency.getKey(), autoUpdateCheck.isSelected()));
+            autoUpdateCheck.addActionListener(e -> {
+                boolean enable = autoUpdateCheck.isSelected();
+                if (!AutoUpdateConfirmation.confirm(project, dependency, enable)) {
+                    autoUpdateCheck.setSelected(!enable);
+                    return;
+                }
+                AutoUpdateService.getInstance(project).setAutoUpdate(
+                        pom, dependency.getKey(), enable);
+            });
             gbc.gridy = row++;
             gbc.gridx = 0;
             gbc.gridwidth = 2;

@@ -32,15 +32,15 @@ import java.util.EnumMap;
 import java.util.Map;
 
 /**
- * Two settings in one dialog: per dependency field, whether it appears directly in the
- * table or only behind the "Details" button; and at which moments the "auto update"
- * flag actually checks Maven Central. Applied when the dialog is closed with OK.
+ * Controls dependency-field placement, auto-update triggers, optional non-major update
+ * confirmations and the custom shortcut. Applied when the dialog is closed with OK.
  */
 class CustomizePageDialog extends DialogWrapper {
 
     private final Map<Field, JBCheckBox> inTable = new EnumMap<>(Field.class);
     private final Map<Field, JBCheckBox> inDetails = new EnumMap<>(Field.class);
     private final Map<Trigger, JBCheckBox> triggers = new EnumMap<>(Trigger.class);
+    private JBCheckBox confirmNonMajorUpdates;
     /** Created together with the trigger rows; null only before the panel is built. */
     private ShortcutField shortcutField;
 
@@ -145,6 +145,26 @@ class CustomizePageDialog extends DialogWrapper {
             }
         }
 
+        gbc.gridy = row++;
+        gbc.insets = JBUI.insets(8, 6, 1, 6);
+        list.add(header("Auto update confirmations"), gbc);
+
+        confirmNonMajorUpdates = new JBCheckBox(
+                "Ask before minor and patch auto updates",
+                service.isConfirmNonMajorUpdates());
+        confirmNonMajorUpdates.setToolTipText(
+                "When disabled, only major auto updates require confirmation.");
+        gbc.gridy = row++;
+        gbc.insets = JBUI.insets(1, 6);
+        list.add(confirmNonMajorUpdates, gbc);
+
+        JBLabel confirmationHint = new JBLabel(
+                "Major auto updates always require confirmation and cannot be disabled here.");
+        confirmationHint.setForeground(UIUtil.getContextHelpForeground());
+        gbc.gridy = row++;
+        gbc.insets = JBUI.insets(1, 28, 1, 6);
+        list.add(confirmationHint, gbc);
+
         JBLabel hint = new JBLabel("<html>Only dependencies with the green <b>auto update</b> flag are "
                 + "touched. Tick nothing to update only by hand.</html>");
         hint.setForeground(UIUtil.getContextHelpForeground());
@@ -229,6 +249,9 @@ class CustomizePageDialog extends DialogWrapper {
         for (Trigger trigger : Trigger.values()) {
             triggers.get(trigger).setSelected(trigger.enabledByDefault);
         }
+        if (confirmNonMajorUpdates != null) {
+            confirmNonMajorUpdates.setSelected(true);
+        }
         if (shortcutField != null) {
             shortcutField.clear();
         }
@@ -262,6 +285,8 @@ class CustomizePageDialog extends DialogWrapper {
         for (Trigger trigger : Trigger.values()) {
             autoUpdate.setTriggerEnabled(trigger, triggers.get(trigger).isSelected());
         }
+        autoUpdate.setConfirmNonMajorUpdates(
+                confirmNonMajorUpdates == null || confirmNonMajorUpdates.isSelected());
         applyShortcut();
         service.notifyCustomizationChanged();
         super.doOKAction();

@@ -1,14 +1,20 @@
 package com.zukotuutori.mavenassist.ui;
 
+import com.zukotuutori.mavenassist.maven.PomUtils;
 import com.zukotuutori.mavenassist.services.AutoUpdateRunner;
 import com.zukotuutori.mavenassist.services.AutoUpdateSettings;
 import com.zukotuutori.mavenassist.services.MavenAssistProjectSettings;
+import com.zukotuutori.mavenassist.services.PomTemplateService;
 import com.zukotuutori.mavenassist.services.UiCustomizationService;
 import com.zukotuutori.mavenassist.util.Notifier;
 import com.zukotuutori.mavenassist.util.ProjectTrust;
 import com.intellij.icons.AllIcons;
 import com.intellij.ide.ui.LafManagerListener;
 import com.intellij.openapi.Disposable;
+import com.intellij.openapi.actionSystem.ActionManager;
+import com.intellij.openapi.actionSystem.AnAction;
+import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.actionSystem.ex.AnActionListener;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.fileChooser.FileChooser;
@@ -16,6 +22,7 @@ import com.intellij.openapi.fileChooser.FileChooserDescriptor;
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory;
 import com.intellij.openapi.fileEditor.FileDocumentManagerListener;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.roots.ProjectFileIndex;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.vfs.LocalFileSystem;
@@ -31,11 +38,15 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.JButton;
+import javax.swing.JMenuItem;
 import javax.swing.JPanel;
+import javax.swing.JPopupMenu;
 import javax.swing.JTextField;
 import java.awt.BorderLayout;
 import java.awt.CardLayout;
 import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -50,6 +61,8 @@ public class MavenAssistPanel extends JPanel implements Disposable {
     private static final String CARD_CREATE = "create";
     private static final String CARD_TABLE = "table";
     private static final String CARD_EMPTY = "empty";
+    private static final String SAVE_ALL_ACTION_ID = "SaveAll";
+    private static final String SAVE_DOCUMENT_ACTION_ID = "SaveDocument";
 
     private final Project project;
     private final JTextField directoryField = new JTextField();
@@ -105,8 +118,8 @@ public class MavenAssistPanel extends JPanel implements Disposable {
     }
 
     /**
-     * Reload on project save (Save All / auto-save) and whenever the watched pom.xml
-     * changes on disk. Only an actual save inside this project triggers auto update;
+     * Reload on project save (Save / Save All / auto-save) and whenever the watched pom.xml
+     * changes on disk. Explicit save actions trigger even when there is no dirty document;
      * external/VFS changes merely refresh the table.
      */
     private void subscribeToSaveAndFileEvents() {
@@ -116,14 +129,24 @@ public class MavenAssistPanel extends JPanel implements Disposable {
                     public void beforeDocumentSaving(@NotNull Document document) {
                         VirtualFile file = com.intellij.openapi.fileEditor.FileDocumentManager
                                 .getInstance().getFile(document);
-                        if (file == null || !belongsToThisProject(file) || !saveCallbackQueued.compareAndSet(false, true)) {
+                        if (file == null || !belongsToThisProject(file)) {
                             return;
                         }
-                        // invokeLater: run after the document has actually been written to disk.
-                        ApplicationManager.getApplication().invokeLater(() -> {
-                            saveCallbackQueued.set(false);
-                            onProjectSaved();
-                        });
+                        queueProjectSavedCallback();
+                    }
+                });
+
+        ApplicationManager.getApplication().getMessageBus().connect(this)
+                .subscribe(AnActionListener.TOPIC, new AnActionListener() {
+                    @Override
+                    public void beforeActionPerformed(@NotNull AnAction action,
+                                                      @NotNull AnActionEvent event) {
+                        String actionId = ActionManager.getInstance().getId(action);
+                        if (project.equals(event.getProject())
+                                && (SAVE_ALL_ACTION_ID.equals(actionId)
+                                || SAVE_DOCUMENT_ACTION_ID.equals(actionId))) {
+                            queueProjectSavedCallback();
+                        }
                     }
                 });
 
@@ -143,6 +166,19 @@ public class MavenAssistPanel extends JPanel implements Disposable {
                         }
                     }
                 });
+    }
+
+    /** Coalesces Save action and document-save events, then runs after disk writes complete. */
+    private void queueProjectSavedCallback() {
+        if (!saveCallbackQueued.compareAndSet(false, true)) {
+            return;
+        }
+        ApplicationManager.getApplication().invokeLater(() -> {
+            saveCallbackQueued.set(false);
+            if (!project.isDisposed()) {
+                onProjectSaved();
+            }
+        });
     }
 
     private boolean belongsToThisProject(@NotNull VirtualFile file) {
@@ -197,12 +233,17 @@ public class MavenAssistPanel extends JPanel implements Disposable {
         return bar;
     }
 
-    /** Bottom bar: the blue "Customize..." link on the left, "MVN Clean Install" on the right. */
+    /** Bottom bar shared by every view: customization, template actions and full Maven build. */
     private @NotNull JPanel buildBottomBar() {
         ActionLink customizeLink = new ActionLink("Customize...",
                 (java.awt.event.ActionListener) e -> new CustomizePageDialog(project).show());
-        customizeLink.setToolTipText("Choose which dependency fields appear in the table, "
-                + "and when \"auto update\" checks for new versions.");
+        customizeLink.setToolTipText("Choose dependency fields, auto-update triggers, "
+                + "confirmation behavior and the keyboard shortcut.");
+
+        JButton templateButton = new JButton("Template");
+        templateButton.setToolTipText("Save, export or import Maven Assist templates");
+        templateButton.setMargin(JBUI.insets(2, 8));
+        templateButton.addActionListener(e -> showTemplateMenu(templateButton));
 
         JButton cleanInstallButton = new JButton("MVN Clean Install",
                 com.intellij.util.IconUtil.colorize(AllIcons.Actions.Execute, java.awt.Color.WHITE));
@@ -216,8 +257,146 @@ public class MavenAssistPanel extends JPanel implements Disposable {
         bottom.setOpaque(false);
         bottom.setBorder(JBUI.Borders.empty(2, 8, 4, 8));
         bottom.add(customizeLink, BorderLayout.WEST);
-        bottom.add(cleanInstallButton, BorderLayout.EAST);
+        JPanel actions = new JPanel(new java.awt.GridLayout(1, 2, JBUI.scale(4), 0));
+        actions.setOpaque(false);
+        actions.add(templateButton);
+        actions.add(cleanInstallButton);
+        bottom.add(actions, BorderLayout.EAST);
         return bottom;
+    }
+
+    private void showTemplateMenu(@NotNull JButton owner) {
+        JPopupMenu menu = new JPopupMenu();
+        JMenuItem saveAs = new JMenuItem("Save As...");
+        saveAs.addActionListener(e -> saveAsTemplate());
+        menu.add(saveAs);
+        JMenuItem export = new JMenuItem("Export...");
+        export.addActionListener(e -> exportCurrentPom());
+        menu.add(export);
+        JMenuItem importItem = new JMenuItem("Import...");
+        importItem.addActionListener(e -> importTemplate());
+        menu.add(importItem);
+        menu.show(owner, 0, owner.getHeight());
+    }
+
+    /** Asks only for a name, then snapshots whichever of the create/manage views is active. */
+    private void saveAsTemplate() {
+        if (!CARD_CREATE.equals(activeCard) && !CARD_TABLE.equals(activeCard)) {
+            Notifier.warn(project, "Choose a valid project directory first.");
+            return;
+        }
+        String name = askTemplateName("Save as Template", "");
+        if (name == null) {
+            return;
+        }
+        try {
+            PomTemplateService.Template template;
+            if (CARD_CREATE.equals(activeCard)) {
+                template = createPanel.snapshotTemplate(name);
+            } else {
+                String selected = directoryField.getText().trim();
+                File pom = new File(selected, "pom.xml");
+                template = PomTemplateService.snapshotPom(name, pom);
+            }
+            PomTemplateService.getInstance().save(template);
+            Notifier.info(project, "Saved template \"" + name + "\".");
+        } catch (java.io.IOException e) {
+            Notifier.error(project, "Could not save the current pom as a template: " + e.getMessage());
+        }
+    }
+
+    /** Copies the current project's pom.xml exactly into a user-selected folder. */
+    private void exportCurrentPom() {
+        String selected = directoryField.getText().trim();
+        File source = selected.isEmpty() ? null : new File(selected, "pom.xml");
+        if (source == null || !source.isFile()) {
+            Notifier.warn(project, "There is no current pom.xml to export. "
+                    + "Choose a project containing one or create it first.");
+            return;
+        }
+        FileChooserDescriptor descriptor = FileChooserDescriptorFactory.createSingleFolderDescriptor()
+                .withTitle("Export Current pom.xml")
+                .withDescription("Choose the folder where the current pom.xml should be copied.");
+        VirtualFile folder = FileChooser.chooseFile(descriptor, project, currentDirectoryVirtualFile());
+        if (folder == null) {
+            return;
+        }
+        File target = new File(folder.getPath(), "pom.xml");
+        try {
+            if (target.exists() && Files.isSameFile(source.toPath(), target.toPath())) {
+                Notifier.warn(project, "The selected folder already contains the current pom.xml.");
+                return;
+            }
+            if (target.exists()) {
+                int answer = Messages.showYesNoDialog(project,
+                        "pom.xml already exists in the selected folder.\n\nReplace it?",
+                        "Replace Existing pom.xml", "Replace", "Cancel", Messages.getWarningIcon());
+                if (answer != Messages.YES) {
+                    return;
+                }
+            }
+            PomUtils.copyPom(source, target);
+            LocalFileSystem.getInstance().refreshAndFindFileByIoFile(target);
+            Notifier.info(project, "Exported the current pom.xml to " + target.getAbsolutePath() + ".");
+        } catch (IOException e) {
+            Notifier.error(project, "Could not export the current pom.xml: " + e.getMessage());
+        }
+    }
+
+    /** Imports a local pom.xml into the application-level template list. */
+    private void importTemplate() {
+        FileChooserDescriptor descriptor = FileChooserDescriptorFactory.createSingleFileDescriptor("xml")
+                .withTitle("Import Template from pom.xml")
+                .withDescription("Choose a pom.xml file up to 5 MB.");
+        VirtualFile chosen = FileChooser.chooseFile(descriptor, project, currentDirectoryVirtualFile());
+        if (chosen == null) {
+            return;
+        }
+        try {
+            PomTemplateService.Template template =
+                    PomTemplateService.importPom("", new File(chosen.getPath()));
+            String name = askTemplateName("Import Template", template.artifactId);
+            if (name == null) {
+                return;
+            }
+            template.name = name;
+            PomTemplateService.getInstance().save(template);
+            Notifier.info(project, "Imported pom.xml as template \"" + name + "\".");
+        } catch (java.io.IOException e) {
+            Notifier.error(project, "Could not import the selected pom.xml: " + e.getMessage());
+        }
+    }
+
+    private @Nullable VirtualFile currentDirectoryVirtualFile() {
+        String selected = directoryField.getText().trim();
+        File directory = selected.isEmpty() ? null : new File(selected);
+        return directory != null && directory.isDirectory()
+                ? LocalFileSystem.getInstance().refreshAndFindFileByIoFile(directory)
+                : null;
+    }
+
+    /** Keeps the interaction to one value while matching the existing unique-name rule. */
+    private @Nullable String askTemplateName(@NotNull String title, @NotNull String initialValue) {
+        while (true) {
+            String input = Messages.showInputDialog(this,
+                    "Template name:", title,
+                    Messages.getQuestionIcon(), initialValue, null);
+            if (input == null) {
+                return null;
+            }
+            String name = input.trim();
+            if (name.isEmpty()) {
+                Messages.showErrorDialog(this, "Give the template a name.", title);
+                continue;
+            }
+            if (PomTemplateService.getInstance().exists(name)) {
+                Messages.showErrorDialog(this,
+                        "A template named \"" + name + "\" already exists.",
+                        title);
+                continue;
+            }
+            return name;
+        }
     }
 
     /** Runs "mvn clean install" in the chosen directory (wrapper preferred, like all builds). */

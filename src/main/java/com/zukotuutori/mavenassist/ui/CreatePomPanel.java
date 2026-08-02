@@ -93,6 +93,15 @@ public class CreatePomPanel extends JPanel {
 
         form.setOpaque(false);
         int row = 0;
+        JButton chooseTemplateButton = new JButton("Choose Template");
+        chooseTemplateButton.setToolTipText("Fill the whole form from a saved template");
+        chooseTemplateButton.addActionListener(e -> chooseTemplate());
+        gbc.gridy = row++;
+        gbc.gridx = 0;
+        gbc.weightx = 1;
+        gbc.gridwidth = 2;
+        form.add(chooseTemplateButton, gbc);
+
         addFormRow(form, gbc, row++, "No pom.xml found in this directory: Create one:", null);
         addFormRow(form, gbc, row++, "Group id:", groupIdField);
         addFormRow(form, gbc, row++, "Artifact id:", artifactIdField);
@@ -101,7 +110,7 @@ public class CreatePomPanel extends JPanel {
         gbc.gridy = row;
         gbc.gridx = 0;
         gbc.weightx = 0;
-        form.add(new JBLabel("Parent pom (optional):"), gbc);
+        form.add(new JBLabel("Parent pom path / GAV (optional):"), gbc);
 
         JPanel parentPanel = new JPanel(new BorderLayout(JBUI.scale(4), 0));
         parentPanel.setOpaque(false);
@@ -143,16 +152,12 @@ public class CreatePomPanel extends JPanel {
         searchRow.setOpaque(false);
         searchRow.add(dependencySearchField, BorderLayout.CENTER);
 
-        JPanel searchButtons = new JPanel(new java.awt.GridLayout(1, 2, JBUI.scale(4), 0));
+        JPanel searchButtons = new JPanel(new java.awt.GridLayout(1, 1, JBUI.scale(4), 0));
         searchButtons.setOpaque(false);
         JButton selectAllButton = new JButton("Select All");
         selectAllButton.setToolTipText("Tick every dependency currently shown (search applied)");
         selectAllButton.addActionListener(e -> dependencyPicker.checkAllVisible());
         searchButtons.add(selectAllButton);
-        JButton chooseTemplateButton = new JButton("Choose Template");
-        chooseTemplateButton.setToolTipText("Fill the whole form from a saved template");
-        chooseTemplateButton.addActionListener(e -> chooseTemplate());
-        searchButtons.add(chooseTemplateButton);
         searchRow.add(searchButtons, BorderLayout.EAST);
 
         header.add(searchRow, BorderLayout.SOUTH);
@@ -198,6 +203,17 @@ public class CreatePomPanel extends JPanel {
         return dependencyPicker.getCheckedDependencies();
     }
 
+    /** Captures the form exactly as currently configured, without contacting Maven Central. */
+    @NotNull PomTemplateService.Template snapshotTemplate(@NotNull String name) {
+        return PomTemplateService.snapshot(name,
+                groupIdField.getText(),
+                artifactIdField.getText(),
+                versionField.getText(),
+                parentPomField.getText(),
+                getSelectedDependencies(),
+                dependencyPicker.getCustomVersions());
+    }
+
     private void showDependencyDetails(@NotNull Dependency dependency) {
         new PickableDetailsDialog(dependency).show();
     }
@@ -213,42 +229,40 @@ public class CreatePomPanel extends JPanel {
     }
 
     /**
-     * Fills the whole form from the template. Dependencies are matched by
-     * groupId:artifactId against the manager's catalog; entries that were removed
-     * from the catalog in the meantime cannot be ticked and are reported.
+     * Fills the whole form from the template. Dependencies that are not in the shared
+     * catalog are added to this picker for the current form only.
      */
     private void applyTemplate(@NotNull PomTemplateService.Template template) {
         groupIdField.setText(template.groupId);
         artifactIdField.setText(template.artifactId);
         versionField.setText(template.version);
-        parentPomField.setText(template.parentPomPath == null ? "" : template.parentPomPath);
+        parentPomField.setText(PomTemplateService.parentReference(template));
 
-        reloadDependencyList();
+        List<Dependency> availableDependencies =
+                new ArrayList<>(DependencyManagerService.getInstance().getAllDependencies());
+        Set<String> available = new HashSet<>();
+        for (Dependency dependency : availableDependencies) {
+            available.add(dependency.getKey());
+        }
+        for (String gav : template.dependencies) {
+            Dependency dependency = Dependency.fromGav(gav);
+            if (dependency != null && available.add(dependency.getKey())) {
+                availableDependencies.add(dependency);
+            }
+        }
+        dependencyPicker.setDependencies(availableDependencies);
         dependencyPicker.checkNone();
         dependencyPicker.clearCustomVersions();
 
-        Set<String> available = new HashSet<>();
-        for (Dependency d : DependencyManagerService.getInstance().getAllDependencies()) {
-            available.add(d.getKey());
-        }
-        List<String> missing = new ArrayList<>();
         for (String gav : template.dependencies) {
             Dependency d = Dependency.fromGav(gav);
             if (d == null) {
                 continue;
             }
-            if (available.contains(d.getKey())) {
-                dependencyPicker.setChecked(d.getKey(), true);
-                if (!template.useNewestVersions && !d.getVersion().isEmpty()) {
-                    dependencyPicker.setCustomVersion(d.getKey(), d.getVersion());
-                }
-            } else {
-                missing.add(d.getKey());
+            dependencyPicker.setChecked(d.getKey(), true);
+            if (!template.useNewestVersions && !d.getVersion().isEmpty()) {
+                dependencyPicker.setCustomVersion(d.getKey(), d.getVersion());
             }
-        }
-        if (!missing.isEmpty()) {
-            Notifier.warn(project, "Template \"" + template.name + "\" references dependencies that are no longer "
-                    + "in the manager and were skipped: " + String.join(", ", missing));
         }
     }
 
@@ -320,31 +334,44 @@ public class CreatePomPanel extends JPanel {
         }
 
         String parentPath = parentPomField.getText().trim();
-        File parentPomFile = parentPath.isEmpty() ? null : new File(parentPath);
-        if (parentPomFile != null && !parentPomFile.isFile()) {
-            Notifier.warn(project, "Parent pom not found: " + parentPath);
-            createInProgress.set(false);
-            return;
+        File parentPomFile = null;
+        PomUtils.PomInfo configuredParent = null;
+        if (!parentPath.isEmpty()) {
+            File candidate = new File(parentPath);
+            if (candidate.isFile()) {
+                parentPomFile = candidate;
+            } else {
+                configuredParent = PomTemplateService.parseParentCoordinates(parentPath);
+                if (configuredParent == null) {
+                    Notifier.warn(project, "Parent must be an existing pom.xml path or "
+                            + "groupId:artifactId:version.");
+                    createInProgress.set(false);
+                    return;
+                }
+            }
         }
         if (parentPomFile != null && !ensureParentPackaging(parentPomFile)) {
             createInProgress.set(false);
             return;
         }
 
+        PomUtils.PomInfo repositoryParent = configuredParent;
+        File localParentPom = parentPomFile;
         List<Dependency> selected = getSelectedDependencies();
         Map<String, String> customVersions = dependencyPicker.getCustomVersions();
         new Task.Backgroundable(project, "Maven Assist: Creating pom.xml", true) {
             @Override
             public void run(@NotNull ProgressIndicator indicator) {
                 try {
-                    PomUtils.PomInfo parentInfo = null;
-                    if (parentPomFile != null) {
+                    PomUtils.PomInfo parentInfo = repositoryParent;
+                    if (localParentPom != null) {
                         indicator.setText("Reading parent pom...");
-                        parentInfo = PomUtils.readPomInfo(parentPomFile);
+                        parentInfo = PomUtils.readPomInfo(localParentPom);
                     }
                     PomUtils.PomInfo finalParentInfo = parentInfo;
 
                     List<Dependency> resolved = new ArrayList<>();
+                    List<String> fallbackVersions = new ArrayList<>();
                     for (Dependency dep : selected) {
                         indicator.checkCanceled();
                         // A pinned version always wins; otherwise the newest stable release is used
@@ -353,6 +380,10 @@ public class CreatePomPanel extends JPanel {
                         if (depVersion == null) {
                             indicator.setText("Fetching newest version of " + dep.getKey() + "...");
                             String latest = MavenCentralClient.getLatestVersion(dep.getGroupId(), dep.getArtifactId());
+                            if (latest == null) {
+                                fallbackVersions.add(dep.getKey() + " → "
+                                        + (dep.getVersion().isBlank() ? "(no catalog version)" : dep.getVersion()));
+                            }
                             depVersion = VersionPolicy.newestOrFallback(dep.getVersion(), latest);
                         }
                         resolved.add(dep.withVersion(depVersion));
@@ -361,12 +392,17 @@ public class CreatePomPanel extends JPanel {
                     indicator.setText("Writing pom.xml...");
                     PomWriteAction.run(project, pomFile, "Create pom.xml",
                             () -> PomUtils.createPom(pomFile, groupId, artifactId, version,
-                                    finalParentInfo, parentPomFile, resolved));
+                                    finalParentInfo, localParentPom, resolved));
 
                     ApplicationManager.getApplication().invokeLater(() -> {
                         LocalFileSystem.getInstance().refreshAndFindFileByIoFile(pomFile);
                         Notifier.info(project, "Created " + pomFile.getAbsolutePath()
                                 + (resolved.isEmpty() ? "" : " with " + resolved.size() + " dependencies."));
+                        if (!fallbackVersions.isEmpty()) {
+                            Notifier.warn(project, "Could not determine the newest version for:\n"
+                                    + String.join("\n", fallbackVersions)
+                                    + "\nThe listed catalog versions were used instead.");
+                        }
                         onPomCreated.run();
                     });
                 } catch (Exception ex) {

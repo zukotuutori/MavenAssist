@@ -7,7 +7,7 @@ import com.zukotuutori.mavenassist.maven.PomWriteAction;
 import com.zukotuutori.mavenassist.maven.VersionPolicy;
 import com.zukotuutori.mavenassist.model.Dependency;
 import com.zukotuutori.mavenassist.services.AutoUpdateSettings.Trigger;
-import com.zukotuutori.mavenassist.ui.MajorUpdateDialog;
+import com.zukotuutori.mavenassist.ui.AutoUpdateApprovalDialog;
 import com.zukotuutori.mavenassist.util.Notifier;
 import com.zukotuutori.mavenassist.util.ProjectTrust;
 import com.intellij.openapi.application.ApplicationManager;
@@ -140,6 +140,7 @@ public final class AutoUpdateRunner {
                                                        @NotNull File pom,
                                                        @Nullable ProgressIndicator indicator) {
         AutoUpdateService service = AutoUpdateService.getInstance(project);
+        AutoUpdateSettings settings = AutoUpdateSettings.getInstance();
 
         List<Dependency> flagged = new ArrayList<>();
         try {
@@ -154,7 +155,8 @@ public final class AutoUpdateRunner {
         }
 
         List<String> updated = new ArrayList<>();
-        List<String> skippedMajor = new ArrayList<>();
+        List<String> skipped = new ArrayList<>();
+        List<String> unavailable = new ArrayList<>();
         for (Dependency dependency : flagged) {
             if (indicator != null) {
                 indicator.checkCanceled();
@@ -162,18 +164,24 @@ public final class AutoUpdateRunner {
             }
             String latest = MavenCentralClient.getLatestVersion(
                     dependency.getGroupId(), dependency.getArtifactId());
-            if (latest == null || !VersionPolicy.isUpgrade(dependency.getVersion(), latest)) {
+            if (latest == null) {
+                unavailable.add(dependency.getKey());
                 continue;
             }
-            if (MajorUpdateDialog.isMajorUpgrade(dependency.getVersion(), latest)) {
-                MajorUpdateDialog.Choice choice =
-                        MajorUpdateDialog.ask(project, dependency, latest);
-                if (choice == MajorUpdateDialog.Choice.NEVER) {
+            if (!VersionPolicy.isUpgrade(dependency.getVersion(), latest)) {
+                continue;
+            }
+            if (requiresConfirmation(dependency.getVersion(), latest,
+                    settings.isConfirmNonMajorUpdates())) {
+                AutoUpdateApprovalDialog.Choice choice =
+                        AutoUpdateApprovalDialog.ask(project, dependency, latest);
+                if (choice == AutoUpdateApprovalDialog.Choice.NEVER) {
                     service.setAutoUpdate(pom, dependency.getKey(), false);
+                    Notifier.info(project, "Auto update disabled for " + dependency.getKey() + ".");
                     continue;
                 }
-                if (choice == MajorUpdateDialog.Choice.SKIP) {
-                    skippedMajor.add(dependency.getKey() + " " + dependency.getVersion()
+                if (choice == AutoUpdateApprovalDialog.Choice.SKIP) {
+                    skipped.add(dependency.getKey() + " " + dependency.getVersion()
                             + " → " + latest);
                     continue;
                 }
@@ -187,12 +195,24 @@ public final class AutoUpdateRunner {
                         "Auto-update of " + dependency.getKey() + " failed: " + e.getMessage());
             }
         }
-        if (!skippedMajor.isEmpty()) {
-            Notifier.info(project, "Left at the current major version:\n"
-                    + String.join("\n", skippedMajor)
-                    + "\nUse the Update button on a row to do it by hand.");
+        if (!skipped.isEmpty()) {
+            Notifier.info(project, "Skipped automatic updates:\n"
+                    + String.join("\n", skipped)
+                    + "\nThey can be reviewed again during the next auto-update run.");
+        }
+        if (!unavailable.isEmpty()) {
+            Notifier.warn(project, "Could not determine the newest version for:\n"
+                    + String.join("\n", unavailable)
+                    + "\nThese auto-update dependencies were not changed.");
         }
         return updated;
+    }
+
+    static boolean requiresConfirmation(@NotNull String currentVersion,
+                                        @NotNull String latestVersion,
+                                        boolean confirmNonMajorUpdates) {
+        return confirmNonMajorUpdates
+                || AutoUpdateApprovalDialog.isMajorUpgrade(currentVersion, latestVersion);
     }
 
     private static void runOnEdt(@Nullable Runnable runnable) {

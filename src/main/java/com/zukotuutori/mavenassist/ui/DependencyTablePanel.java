@@ -90,7 +90,6 @@ public class DependencyTablePanel extends JPanel {
     private final JButton deleteModeButton = new JButton(AllIcons.Actions.GC);
     private final JButton deleteSelectedButton = new JButton("Delete Selected", AllIcons.Actions.GC);
     private final JPanel deleteBar = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, JBUI.scale(4), 0));
-    private boolean onlyNewest;
     private boolean onlyAuto;
 
     /** True while the user is ticking dependencies for bulk deletion (extra checkbox column). */
@@ -192,7 +191,7 @@ public class DependencyTablePanel extends JPanel {
         row.setOpaque(false);
         row.add(searchField, BorderLayout.CENTER);
 
-        filterButton.setToolTipText("Filter the list (only newest version / only auto update)");
+        filterButton.setToolTipText("Filter the list (only auto update)");
         filterButton.setMargin(JBUI.insets(2, 6));
         filterButton.addActionListener(e -> showFilterMenu());
         deleteModeButton.setToolTipText("Select multiple dependencies to delete from the pom");
@@ -340,20 +339,8 @@ public class DependencyTablePanel extends JPanel {
     /** The filter menu that pops up under the filter button. */
     private void showFilterMenu() {
         javax.swing.JPopupMenu menu = new javax.swing.JPopupMenu();
-        javax.swing.JCheckBoxMenuItem newestItem = new javax.swing.JCheckBoxMenuItem("Only newest version", onlyNewest);
-        // Keep the menu open while toggling filters; it closes on Esc or a click outside.
-        newestItem.putClientProperty("CheckBoxMenuItem.doNotCloseOnMouseClick", Boolean.TRUE);
-        newestItem.setToolTipText("Show only dependencies that are already on the newest version "
-                + "(missing newest versions are fetched automatically).");
-        newestItem.addActionListener(e -> {
-            onlyNewest = newestItem.isSelected();
-            applyRowFilter();
-            if (onlyNewest) {
-                fetchMissingLatestVersions();
-            }
-        });
-        menu.add(newestItem);
         javax.swing.JCheckBoxMenuItem autoItem = new javax.swing.JCheckBoxMenuItem("Only auto update", onlyAuto);
+        // Keep the menu open while toggling filters; it closes on Esc or a click outside.
         autoItem.putClientProperty("CheckBoxMenuItem.doNotCloseOnMouseClick", Boolean.TRUE);
         autoItem.setToolTipText("Show only dependencies with auto update turned on.");
         autoItem.addActionListener(e -> {
@@ -374,12 +361,6 @@ public class DependencyTablePanel extends JPanel {
                     && !row.displayName().toLowerCase(java.util.Locale.ROOT).contains(query)
                     && !row.dependency.getKey().toLowerCase(java.util.Locale.ROOT).contains(query)
                     && !row.dependency.getVersion().toLowerCase(java.util.Locale.ROOT).contains(query)) {
-                continue;
-            }
-            if (onlyNewest
-                    && (row.dependency.getVersion().isBlank()
-                        || row.latest.isEmpty() || "?".equals(row.latest)
-                        || VersionPolicy.isUpgrade(row.dependency.getVersion(), row.latest))) {
                 continue;
             }
             if (onlyAuto
@@ -714,7 +695,11 @@ public class DependencyTablePanel extends JPanel {
         }
         Dependency dep = visibleRows.get(rowIndex).dependency;
         AutoUpdateService service = AutoUpdateService.getInstance(project);
-        service.setAutoUpdate(pomFile, dep.getKey(), !service.isAutoUpdate(pomFile, dep.getKey()));
+        boolean enable = !service.isAutoUpdate(pomFile, dep.getKey());
+        if (!AutoUpdateConfirmation.confirm(project, dep, enable)) {
+            return;
+        }
+        service.setAutoUpdate(pomFile, dep.getKey(), enable);
         // Re-filter: with "Only auto update" active, a turned-off row disappears immediately.
         applyRowFilter();
     }
@@ -733,46 +718,6 @@ public class DependencyTablePanel extends JPanel {
         AutoUpdateRunner.runIfEnabled(project, trigger, pom, this::reload);
     }
 
-    /**
-     * Silently fills in missing newest versions so the "Only newest version" filter has
-     * data to compare against; matching rows appear in the filtered list as results arrive.
-     */
-    private void fetchMissingLatestVersions() {
-        File pom = pomFile;
-        if (pom == null) {
-            return;
-        }
-        List<Row> missing = new ArrayList<>();
-        for (Row row : rows) {
-            if (row.latest.isEmpty() || "?".equals(row.latest)) {
-                missing.add(row);
-            }
-        }
-        if (missing.isEmpty()) {
-            return;
-        }
-        new Task.Backgroundable(project, "Maven Assist: Fetching newest versions", true) {
-            @Override
-            public void run(@NotNull ProgressIndicator indicator) {
-                for (Row row : missing) {
-                    indicator.checkCanceled();
-                    Dependency dep = row.dependency;
-                    indicator.setText("Checking " + dep.getKey() + "...");
-                    String latest = MavenCentralClient.getLatestVersion(dep.getGroupId(), dep.getArtifactId());
-                    if (latest != null) {
-                        ApplicationManager.getApplication().invokeLater(() -> {
-                            latestCache.put(dep.getKey(), latest);
-                            if (pom.equals(pomFile)) {
-                                row.latest = latest;
-                                applyRowFilter();
-                            }
-                        });
-                    }
-                }
-            }
-        }.queue();
-    }
-
     /** Fetches the newest version of every dependency and reports a summary notification. */
     private void fetchLatestVersions() {
         File pom = pomFile;
@@ -781,6 +726,7 @@ public class DependencyTablePanel extends JPanel {
             @Override
             public void run(@NotNull ProgressIndicator indicator) {
                 List<String> outdated = new ArrayList<>();
+                List<String> unavailable = new ArrayList<>();
                 for (Row row : snapshot) {
                     indicator.checkCanceled();
                     Dependency dep = row.dependency;
@@ -797,30 +743,73 @@ public class DependencyTablePanel extends JPanel {
                         if (VersionPolicy.isUpgrade(dep.getVersion(), latest)) {
                             outdated.add(row.displayName() + ": " + dep.getVersion() + " → " + latest);
                         }
+                    } else {
+                        unavailable.add(dep.getKey());
+                        ApplicationManager.getApplication().invokeLater(() -> {
+                            if (pom.equals(pomFile)) {
+                                row.latest = "?";
+                                applyRowFilter();
+                            }
+                        });
                     }
                 }
-                if (outdated.isEmpty()) {
+                if (outdated.isEmpty() && unavailable.isEmpty()) {
                     Notifier.info(project, "All dependencies are up to date. ✔");
-                } else {
+                } else if (!outdated.isEmpty()) {
                     Notifier.info(project, outdated.size() + " update(s) available:\n" + String.join("\n", outdated)
                             + "\nOpen \"Details\" on a dependency to update it.");
+                }
+                if (!unavailable.isEmpty()) {
+                    Notifier.warn(project, "Could not determine the newest version for "
+                            + unavailable.size() + " dependencies:\n" + String.join("\n", unavailable)
+                            + "\nThese dependencies were not reported as up to date.");
                 }
             }
         }.queue();
     }
 
-    /** Bumps every dependency in the pom to its newest version, then builds once. */
+    /** Confirms the scope, updates those dependencies, then builds once. */
     private void updateAllToNewest() {
         File pom = pomFile;
         if (pom == null) {
             return;
         }
-        List<Row> snapshot = new ArrayList<>(rows);
-        new Task.Backgroundable(project, "Maven Assist: Updating all dependencies", true) {
+        int answer = com.intellij.openapi.ui.Messages.showYesNoCancelDialog(project,
+                "Are you sure you want to update all dependencies?",
+                "Update All Dependencies",
+                "Yes", "Only Selected...", "No",
+                com.intellij.openapi.ui.Messages.getQuestionIcon());
+        if (answer == com.intellij.openapi.ui.Messages.CANCEL) {
+            return;
+        }
+
+        List<Row> snapshot;
+        boolean allDependencies = answer == com.intellij.openapi.ui.Messages.YES;
+        if (allDependencies) {
+            snapshot = new ArrayList<>(rows);
+        } else {
+            List<Dependency> dependencies = rows.stream().map(row -> row.dependency).toList();
+            SelectDependenciesToUpdateDialog dialog =
+                    new SelectDependenciesToUpdateDialog(project, dependencies);
+            if (!dialog.showAndGet()) {
+                return;
+            }
+            Set<String> selectedKeys = new HashSet<>();
+            for (Dependency dependency : dialog.getSelectedDependencies()) {
+                selectedKeys.add(dependency.getKey());
+            }
+            snapshot = rows.stream()
+                    .filter(row -> selectedKeys.contains(row.dependency.getKey()))
+                    .toList();
+        }
+
+        String scope = allDependencies ? "all dependencies" : "selected dependencies";
+        new Task.Backgroundable(project, "Maven Assist: Updating " + scope, true) {
             @Override
             public void run(@NotNull ProgressIndicator indicator) {
                 int updated = 0;
                 List<String> failures = new ArrayList<>();
+                List<String> unavailable = new ArrayList<>();
                 for (Row row : snapshot) {
                     indicator.checkCanceled();
                     Dependency dep = row.dependency;
@@ -828,7 +817,11 @@ public class DependencyTablePanel extends JPanel {
                     String latest = row.latest.isEmpty() || "?".equals(row.latest)
                             ? MavenCentralClient.getLatestVersion(dep.getGroupId(), dep.getArtifactId())
                             : row.latest;
-                    if (latest == null || !VersionPolicy.isUpgrade(dep.getVersion(), latest)) {
+                    if (latest == null) {
+                        unavailable.add(dep.getKey());
+                        continue;
+                    }
+                    if (!VersionPolicy.isUpgrade(dep.getVersion(), latest)) {
                         continue;
                     }
                     try {
@@ -843,13 +836,20 @@ public class DependencyTablePanel extends JPanel {
                 if (!failures.isEmpty()) {
                     Notifier.error(project, "Could not update:\n" + String.join("\n", failures));
                 }
+                if (!unavailable.isEmpty()) {
+                    Notifier.warn(project, "Could not determine the newest version for:\n"
+                            + String.join("\n", unavailable)
+                            + "\nThese dependencies were not changed.");
+                }
                 if (updated == 0) {
-                    if (failures.isEmpty()) {
+                    if (failures.isEmpty() && unavailable.isEmpty()) {
                         Notifier.info(project, "All dependencies are already up to date. ✔");
                     }
                     return;
                 }
-                Notifier.info(project, "Updated " + updated + " dependencies to the newest version. Building...");
+                Notifier.info(project, "Updated " + updated
+                        + (allDependencies ? " dependencies" : " selected dependencies")
+                        + " to the newest version. Building...");
                 ApplicationManager.getApplication().invokeLater(() -> {
                     LocalFileSystem.getInstance().refreshAndFindFileByIoFile(pom);
                     reload();
@@ -946,12 +946,17 @@ public class DependencyTablePanel extends JPanel {
             @Override
             public void run(@NotNull ProgressIndicator indicator) {
                 List<Dependency> resolved = new ArrayList<>();
+                List<String> fallbackVersions = new ArrayList<>();
                 for (Dependency dep : selected) {
                     indicator.checkCanceled();
                     String version = dep.getVersion();
                     if (!fixedVersionKeys.contains(dep.getKey())) {
                         indicator.setText("Fetching newest version of " + dep.getKey() + "...");
                         String latest = MavenCentralClient.getLatestVersion(dep.getGroupId(), dep.getArtifactId());
+                        if (latest == null) {
+                            fallbackVersions.add(dep.getKey() + " → "
+                                    + (version.isBlank() ? "(no catalog version)" : version));
+                        }
                         version = VersionPolicy.newestOrFallback(version, latest);
                     }
                     resolved.add(dep.withVersion(version));
@@ -1000,6 +1005,11 @@ public class DependencyTablePanel extends JPanel {
                 Notifier.info(project, "Added " + toAdd.size() + " dependencies to pom.xml"
                         + (autoUpdateCount > 0 ? " (" + autoUpdateCount + " with auto update)" : "")
                         + ". Building...");
+                if (!fallbackVersions.isEmpty()) {
+                    Notifier.warn(project, "Could not determine the newest version for:\n"
+                            + String.join("\n", fallbackVersions)
+                            + "\nThe listed catalog versions were used instead.");
+                }
                 ApplicationManager.getApplication().invokeLater(() -> {
                     LocalFileSystem.getInstance().refreshAndFindFileByIoFile(pom);
                     reload();

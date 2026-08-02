@@ -18,15 +18,18 @@ searchable catalog. **Select All** takes everything the current search turned up
 
 ### Reuse a setup with templates
 
-Save a whole configuration: coordinates, parent pom, the newest-version setting and the ticked
-dependencies: under a name, then apply it in any project with two clicks. Templates are created and
-deleted from the same window and persist across IDE restarts.
+Use **Template** in the bottom bar from either the create or manage view. **Save As...** captures the
+current coordinates, parent pom, dependencies and version choices under a name. **Export...** copies the
+current project's existing `pom.xml` to a folder you choose, while **Import...** turns a local `pom.xml`
+into a saved template. Apply the setup in any project with two clicks. Templates can also be created,
+edited and deleted from the template window and persist across IDE restarts.
 
 ### Manage an existing pom
 
 Every dependency is listed with its version, including versions resolved from `${properties}`. Search the
-table, or filter it down to *Only newest version* or *Only auto update*. **Check for Updates** fills in the
-newest version for every row; **Update All** bumps the entire pom in one go.
+table, or filter it down to *Only auto update*. **Check for Updates** fills in the
+newest version for every row. **Update All** asks whether to update everything, cancel, or choose the
+dependencies to update from a checkbox list.
 
 Press **Update** beside a single version to choose the newest stable release or type a specific one. Maven Assist
 rewrites the pom, runs `mvn compile`, and reports the result as a notification.
@@ -34,8 +37,13 @@ rewrites the pom, runs `mvn compile`, and reports the result as a notification.
 ### Keep dependencies fresh automatically
 
 Flag any dependency and it is checked against Maven Central at the moments enabled under **Customize**,
-then bumped if a newer stable release exists. Save events are scoped to the current project, and all
-automatic work is disabled while the project is in IntelliJ safe mode.
+then offered a newer stable release. Every automatic update asks by default, showing the dependency,
+current and new versions, and a link to the release information. Choose **Yes**, **No**, or **Never**;
+**Never** disables auto update only for that dependency. The confirmation can be disabled for minor and
+patch updates under **Customize**, but major updates always require it. Turning the auto-update flag on or
+off also requires confirmation. Pressing **Save** runs the save trigger even when no files have changed;
+save events are scoped to the current project, and all automatic work is disabled while the project is in
+IntelliJ safe mode.
 
 ### Add and remove dependencies
 
@@ -73,15 +81,17 @@ the project's own `<dependencies>` block.
 Maven Assist itself makes direct network requests only for a feature you invoke or a dependency you
 explicitly flag for automatic update:
 
-- **`search.maven.org`**: when checking updates, choosing **Newest**, opening version details,
+- **`repo1.maven.org`**: when checking updates, choosing **Newest**, opening version details,
   creating/adding a dependency configured for newest, or running an enabled auto-update pass. The
-  `groupId` and `artifactId` are sent; private coordinates can therefore reveal internal naming.
+  artifact's Maven repository metadata is requested, so its `groupId` and `artifactId` are sent; private
+  coordinates can therefore reveal internal naming.
   Merely opening or refreshing the tool window sends nothing, and custom pinned versions are not checked.
 - **`dlcdn.apache.org` / `archive.apache.org`**: to download Maven, if you accept the offer to install it.
 
 Maven, Homebrew and winget are separate tools and may use their configured repositories when Maven Assist
 launches them. There is no telemetry or analytics. Templates, the dependency catalog and layout remain
-local to this IDE installation; project state stores relative paths rather than usernames/home paths.
+local to this IDE installation. **Export...** copies the current `pom.xml` unchanged, so review its
+contents before sharing it. Project state stores relative paths rather than usernames/home paths.
 
 ---
 

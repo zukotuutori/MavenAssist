@@ -13,9 +13,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * When the "auto update" flag actually checks Maven Central. A genuine user preference:
- * application-wide and local to this IDE installation. The light-service persistence
- * contract requires roaming to be disabled.
+ * Controls auto-update triggers and optional non-major confirmation dialogs. These are
+ * application-wide preferences local to this IDE installation. The light-service
+ * persistence contract requires roaming to be disabled.
  */
 @Service
 @State(name = "MavenAssistAutoUpdateTriggers",
@@ -48,6 +48,11 @@ public final class AutoUpdateSettings implements PersistentStateComponent<AutoUp
         public boolean triggersConfigured = false;
         /** Enabled {@link Trigger} names; only consulted when {@link #triggersConfigured}. */
         public List<String> triggers = new ArrayList<>();
+        /**
+         * Ask before minor and patch auto updates. Major updates always ask regardless of
+         * this preference.
+         */
+        public boolean confirmNonMajorUpdates = true;
     }
 
     private State state = new State();
@@ -80,6 +85,14 @@ public final class AutoUpdateSettings implements PersistentStateComponent<AutoUp
         } else {
             state.triggers.remove(trigger.name());
         }
+    }
+
+    public synchronized boolean isConfirmNonMajorUpdates() {
+        return state.confirmNonMajorUpdates;
+    }
+
+    public synchronized void setConfirmNonMajorUpdates(boolean confirm) {
+        state.confirmNonMajorUpdates = confirm;
     }
 
     @Override

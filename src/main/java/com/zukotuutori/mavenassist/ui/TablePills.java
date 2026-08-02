@@ -109,8 +109,8 @@ final class TablePills {
                                                        boolean hasFocus, int row, int column) {
             boolean on = Boolean.TRUE.equals(value);
             setPill(on ? AUTO_ON : AUTO_OFF, null,
-                    on ? "Auto update is ON. It is checked at the times selected under Customize. Click to turn off."
-                            : "Auto update is OFF. Click to turn on.");
+                    on ? "Auto update is ON. Click to review turning it off."
+                            : "Auto update is OFF. Click to review turning it on.");
             return this;
         }
     }

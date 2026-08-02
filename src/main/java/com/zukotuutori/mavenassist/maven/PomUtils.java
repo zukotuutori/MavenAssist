@@ -411,6 +411,48 @@ public final class PomUtils {
                                               @Nullable PomInfo parent,
                                               @Nullable File parentPomFile,
                                               @NotNull List<Dependency> dependencies) throws IOException {
+        writeNewAtomically(targetPomFile.toPath(), pomXml(targetPomFile, groupId, artifactId,
+                version, parent, parentPomFile, dependencies));
+    }
+
+    /** Copies the current pom exactly to an explicitly selected export target. */
+    public static synchronized void copyPom(@NotNull File sourcePom,
+                                            @NotNull File targetPom) throws IOException {
+        Path source = sourcePom.toPath().toAbsolutePath().normalize();
+        Path target = targetPom.toPath().toAbsolutePath().normalize();
+        if (!Files.isRegularFile(source)) {
+            throw new IOException("Current pom.xml is not a regular file: " + source);
+        }
+        if (Files.exists(target) && Files.isSameFile(source, target)) {
+            throw new IOException("The selected folder already contains the current pom.xml.");
+        }
+        Path parent = target.getParent();
+        if (parent == null || !Files.isDirectory(parent)) {
+            throw new IOException("Export directory does not exist: " + target);
+        }
+        if (Files.exists(target) && !Files.isRegularFile(target)) {
+            throw new IOException("Export target is not a regular file: " + target);
+        }
+        Path temp = Files.createTempFile(parent, ".pom.xml.", ".mavenassist.tmp");
+        try {
+            Files.copy(source, temp, StandardCopyOption.REPLACE_EXISTING);
+            try {
+                Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            } catch (AtomicMoveNotSupportedException e) {
+                Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } finally {
+            Files.deleteIfExists(temp);
+        }
+    }
+
+    private static @NotNull String pomXml(@NotNull File targetPomFile,
+                                          @NotNull String groupId,
+                                          @NotNull String artifactId,
+                                          @NotNull String version,
+                                          @Nullable PomInfo parent,
+                                          @Nullable File parentPomFile,
+                                          @NotNull List<Dependency> dependencies) {
         StringBuilder sb = new StringBuilder();
         sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
         sb.append("<project xmlns=\"http://maven.apache.org/POM/4.0.0\"\n");
@@ -450,7 +492,7 @@ public final class PomUtils {
         }
 
         sb.append("</project>\n");
-        writeNewAtomically(targetPomFile.toPath(), sb.toString());
+        return sb.toString();
     }
 
     /**

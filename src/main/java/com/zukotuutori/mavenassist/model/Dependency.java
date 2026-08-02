@@ -82,17 +82,37 @@ public final class Dependency {
         return groupId + ":" + artifactId + ":" + version;
     }
 
+    /**
+     * Maven-style coordinate used by templates. The short form stays compatible with
+     * existing templates; type and classifier are included only when they carry identity.
+     */
+    public @NotNull String toTemplateCoordinate() {
+        if ((type.isEmpty() || "jar".equals(type)) && classifier.isEmpty()) {
+            return toGav();
+        }
+        return groupId + ":" + artifactId + ":" + effectiveType() + ":" + classifier + ":" + version;
+    }
+
     public @NotNull Dependency withVersion(@Nullable String newVersion) {
         return new Dependency(groupId, artifactId, newVersion, name, type, classifier);
     }
 
-    /** Parses "groupId:artifactId" or "groupId:artifactId:version". */
+    /**
+     * Parses the old template forms {@code groupId:artifactId[:version]} and Maven's
+     * extended {@code groupId:artifactId:type[:classifier]:version} coordinates.
+     */
     public static @Nullable Dependency fromGav(@NotNull String gav) {
-        String[] parts = gav.trim().split(":");
+        String[] parts = gav.trim().split(":", -1);
         if (parts.length < 2 || parts[0].isBlank() || parts[1].isBlank()) {
             return null;
         }
-        return new Dependency(parts[0], parts[1], parts.length > 2 ? parts[2] : "");
+        return switch (parts.length) {
+            case 2 -> new Dependency(parts[0], parts[1], "");
+            case 3 -> new Dependency(parts[0], parts[1], parts[2]);
+            case 4 -> new Dependency(parts[0], parts[1], parts[3], null, parts[2], null);
+            case 5 -> new Dependency(parts[0], parts[1], parts[4], null, parts[2], parts[3]);
+            default -> null;
+        };
     }
 
     public @NotNull String getDisplayName() {

@@ -71,7 +71,7 @@ class CreateTemplateDialog extends DialogWrapper {
             groupIdField.setText(editing.groupId);
             artifactIdField.setText(editing.artifactId);
             versionField.setText(editing.version);
-            parentPomField.setText(editing.parentPomPath == null ? "" : editing.parentPomPath);
+            parentPomField.setText(PomTemplateService.parentReference(editing));
             newestVersionsCheck.setSelected(editing.useNewestVersions);
             for (String gav : editing.dependencies) {
                 Dependency d = Dependency.fromGav(gav);
@@ -106,7 +106,7 @@ class CreateTemplateDialog extends DialogWrapper {
         gbc.gridy = row++;
         gbc.gridx = 0;
         gbc.weightx = 0;
-        form.add(new JBLabel("Parent pom (optional):"), gbc);
+        form.add(new JBLabel("Parent pom path / GAV (optional):"), gbc);
 
         JPanel parentPanel = new JPanel(new BorderLayout(JBUI.scale(4), 0));
         parentPanel.add(parentPomField, BorderLayout.CENTER);
@@ -187,8 +187,10 @@ class CreateTemplateDialog extends DialogWrapper {
             return new ValidationInfo("Version must not be empty.", versionField);
         }
         String parentPath = parentPomField.getText().trim();
-        if (!parentPath.isEmpty() && !new File(parentPath).isFile()) {
-            return new ValidationInfo("Parent pom not found: " + parentPath, parentPomField);
+        if (!parentPath.isEmpty() && !new File(parentPath).isFile()
+                && PomTemplateService.parseParentCoordinates(parentPath) == null) {
+            return new ValidationInfo("Use an existing pom.xml path or groupId:artifactId:version.",
+                    parentPomField);
         }
         return null;
     }
@@ -200,11 +202,11 @@ class CreateTemplateDialog extends DialogWrapper {
         template.groupId = groupIdField.getText().trim();
         template.artifactId = artifactIdField.getText().trim();
         template.version = versionField.getText().trim();
-        template.parentPomPath = parentPomField.getText().trim();
+        PomTemplateService.setParentReference(template, parentPomField.getText());
         template.useNewestVersions = newestVersionsCheck.isSelected();
         List<Dependency> checked = picker.getCheckedDependencies();
         for (Dependency dependency : checked) {
-            template.dependencies.add(dependency.toGav());
+            template.dependencies.add(dependency.toTemplateCoordinate());
         }
         return template;
     }
