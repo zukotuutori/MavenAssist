@@ -54,6 +54,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Shown when the chosen directory contains a pom.xml: a compact list of all
@@ -523,6 +524,7 @@ public class DependencyTablePanel extends JPanel {
     private void updateRowToNewest(@NotNull Row row) {
         Dependency dep = row.dependency;
         String cached = row.latest;
+        File pom = pomFile;
         new Task.Backgroundable(project, "Maven Assist: Fetching newest version of " + dep.getKey(), true) {
             @Override
             public void run(@NotNull ProgressIndicator indicator) {
@@ -539,12 +541,35 @@ public class DependencyTablePanel extends JPanel {
                     return;
                 }
                 if (!VersionPolicy.isUpgrade(dep.getVersion(), latest)) {
-                    Notifier.info(project, dep.getKey() + " is already at the newest stable version.");
+                    Notifier.info(project, dep.getKey() + " is already at the newest stable version"
+                            + versionSource(pom, dep) + ".");
                     return;
                 }
                 applyVersion(dep, latest);
             }
         }.queue();
+    }
+
+    /**
+     * Names the property behind a version, so "already at the newest version" does not look like
+     * the plugin failing to update a ${property} it simply had no newer version for.
+     */
+    private static @NotNull String versionSource(@Nullable File pom, @NotNull Dependency dep) {
+        if (pom == null) {
+            return "";
+        }
+        try {
+            String raw = PomUtils.readRawVersion(pom, dep);
+            if (raw == null || !raw.startsWith("${")) {
+                return "";
+            }
+            PomUtils.VersionProperty property = PomUtils.findVersionProperty(pom, dep);
+            String where = property == null || property.declaringPom().equals(pom)
+                    ? "" : " in " + property.declaringPom().getAbsolutePath();
+            return " (" + dep.getVersion() + ", from " + raw + where + ")";
+        } catch (IOException e) {
+            return "";
+        }
     }
 
     private void changeVersionOfRow(@NotNull Row row) {
@@ -636,8 +661,9 @@ public class DependencyTablePanel extends JPanel {
                     return;
                 }
                 try {
-                    PomWriteAction.run(project, pom, "Update Maven dependency",
-                            () -> PomUtils.setDependencyVersion(pom, dep, newVersion));
+                    if (!writeVersion(pom, dep, newVersion, null)) {
+                        return;
+                    }
                 } catch (IOException e) {
                     Notifier.error(project, "Failed to update " + dep.getKey() + ": " + e.getMessage());
                     return;
@@ -652,6 +678,55 @@ public class DependencyTablePanel extends JPanel {
                 MavenBuildRunner.build(project, pom.getParentFile(), null);
             }
         }.queue();
+    }
+
+    /**
+     * Writes the new version of one dependency. When the version comes from a property that a
+     * parent pom declares, the user decides first whether to bump it there, which moves every
+     * module inheriting it, or to write the version into this pom only. Returns false when they
+     * cancelled. {@code runChoice} carries that answer across a bulk update so it is asked once.
+     */
+    private boolean writeVersion(@NotNull File pom,
+                                 @NotNull Dependency dep,
+                                 @NotNull String newVersion,
+                                 @Nullable AtomicReference<ParentPropertyChoice.Choice> runChoice)
+            throws IOException {
+        PomUtils.VersionProperty property = PomUtils.findVersionProperty(pom, dep);
+        if (property != null && !property.declaringPom().equals(pom)) {
+            ParentPropertyChoice.Choice choice = runChoice == null ? null : runChoice.get();
+            if (choice == null) {
+                choice = ParentPropertyChoice.ask(project, parentPropertyQuestion(
+                        dep, property, newVersion, runChoice != null));
+                if (runChoice != null) {
+                    runChoice.set(choice);
+                }
+            }
+            if (choice == ParentPropertyChoice.Choice.CANCEL) {
+                return false;
+            }
+            if (choice == ParentPropertyChoice.Choice.PARENT) {
+                File declaring = property.declaringPom();
+                PomWriteAction.run(project, declaring, "Update Maven version property",
+                        () -> PomUtils.setProperty(declaring, property.name(), newVersion));
+                return true;
+            }
+        }
+        PomWriteAction.run(project, pom, "Update Maven dependency",
+                () -> PomUtils.setDependencyVersion(pom, dep, newVersion));
+        return true;
+    }
+
+    private static @NotNull String parentPropertyQuestion(@NotNull Dependency dep,
+                                                          @NotNull PomUtils.VersionProperty property,
+                                                          @NotNull String newVersion,
+                                                          boolean appliesToWholeRun) {
+        return dep.getKey() + " takes its version from the property " + property.name()
+                + ", which is declared in\n" + property.declaringPom().getAbsolutePath()
+                + "\n\nUpdate the property there, moving every module that inherits it to "
+                + newVersion + ", or write " + newVersion + " into this pom.xml only?"
+                + (appliesToWholeRun
+                   ? "\n\nThis answer is used for the rest of the dependencies in this update."
+                   : "");
     }
 
     /** The red trash button: asks for confirmation, then removes the dependency from the pom. */
@@ -810,6 +885,7 @@ public class DependencyTablePanel extends JPanel {
                 int updated = 0;
                 List<String> failures = new ArrayList<>();
                 List<String> unavailable = new ArrayList<>();
+                AtomicReference<ParentPropertyChoice.Choice> runChoice = new AtomicReference<>();
                 for (Row row : snapshot) {
                     indicator.checkCanceled();
                     Dependency dep = row.dependency;
@@ -826,9 +902,11 @@ public class DependencyTablePanel extends JPanel {
                     }
                     try {
                         indicator.setText("Updating " + dep.getKey() + " to " + latest + "...");
-                        PomWriteAction.run(project, pom, "Update Maven dependencies",
-                                () -> PomUtils.setDependencyVersion(pom, dep, latest));
-                        updated++;
+                        if (writeVersion(pom, dep, latest, runChoice)) {
+                            updated++;
+                        } else {
+                            break; // cancelled: the answer holds for the rest of this update
+                        }
                     } catch (IOException e) {
                         failures.add(dep.getKey() + ": " + e.getMessage());
                     }

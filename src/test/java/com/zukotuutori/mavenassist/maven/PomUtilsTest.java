@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -73,6 +74,153 @@ class PomUtilsTest {
         assertEquals("9.9.9", result.get(0).getVersion());
         assertEquals("1.0.0", result.get(1).getVersion());
         assertTrue(Files.readString(pom.toPath()).contains("<shared.version>1.0.0</shared.version>"));
+    }
+
+    @Test
+    void bumpsAPropertyThatOnlyAPluginShares() throws Exception {
+        File pom = pom("""
+                <properties><jfrog.version>2.9.0</jfrog.version></properties>
+                <dependencies>
+                    <dependency>
+                        <groupId>org.jfrog.buildinfo</groupId><artifactId>build-info-extractor</artifactId>
+                        <version>${jfrog.version}</version>
+                    </dependency>
+                </dependencies>
+                <build><plugins><plugin>
+                    <groupId>org.jfrog.buildinfo</groupId><artifactId>artifactory-maven-plugin</artifactId>
+                    <version>${jfrog.version}</version>
+                </plugin></plugins></build>
+                """);
+
+        PomUtils.setDependencyVersion(pom, PomUtils.readDependencies(pom).getFirst(), "2.41.9");
+
+        String text = Files.readString(pom.toPath());
+        assertTrue(text.contains("<jfrog.version>2.41.9</jfrog.version>"));
+        assertEquals(2, text.split(Pattern.quote("${jfrog.version}"), -1).length - 1);
+        assertEquals("2.41.9", PomUtils.readDependencies(pom).getFirst().getVersion());
+    }
+
+    @Test
+    void followsAPropertyChainToTheValueThatHoldsTheVersion() throws Exception {
+        File pom = pom("""
+                <properties>
+                    <jfrog.version>${jfrog.base.version}</jfrog.version>
+                    <jfrog.base.version>2.9.0</jfrog.base.version>
+                </properties>
+                <dependencies>
+                    <dependency>
+                        <groupId>org.jfrog.buildinfo</groupId><artifactId>build-info-extractor</artifactId>
+                        <version>${jfrog.version}</version>
+                    </dependency>
+                </dependencies>
+                """);
+
+        assertEquals("2.9.0", PomUtils.readDependencies(pom).getFirst().getVersion());
+        PomUtils.setDependencyVersion(pom, PomUtils.readDependencies(pom).getFirst(), "2.41.9");
+
+        String text = Files.readString(pom.toPath());
+        assertTrue(text.contains("<jfrog.base.version>2.41.9</jfrog.base.version>"));
+        assertTrue(text.contains("<jfrog.version>${jfrog.base.version}</jfrog.version>"));
+    }
+
+    @Test
+    void resolvesAVersionPropertyDeclaredInTheParentPom() throws Exception {
+        File parent = temp.resolve("pom.xml").toFile();
+        Files.writeString(parent.toPath(), """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <project>
+                    <modelVersion>4.0.0</modelVersion>
+                    <groupId>example</groupId><artifactId>root</artifactId><version>1.0.0</version>
+                    <packaging>pom</packaging>
+                    <properties><jfrog.version>2.9.0</jfrog.version></properties>
+                </project>
+                """);
+        Path moduleDir = Files.createDirectory(temp.resolve("module"));
+        File module = moduleDir.resolve("pom.xml").toFile();
+        Files.writeString(module.toPath(), """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <project>
+                    <modelVersion>4.0.0</modelVersion>
+                    <parent>
+                        <groupId>example</groupId><artifactId>root</artifactId><version>1.0.0</version>
+                        <relativePath>../pom.xml</relativePath>
+                    </parent>
+                    <artifactId>module</artifactId>
+                    <dependencies>
+                        <dependency>
+                            <groupId>org.jfrog.buildinfo</groupId>
+                            <artifactId>build-info-extractor</artifactId>
+                            <version>${jfrog.version}</version>
+                        </dependency>
+                    </dependencies>
+                </project>
+                """);
+
+        Dependency dependency = PomUtils.readDependencies(module).getFirst();
+        assertEquals("2.9.0", dependency.getVersion());
+
+        PomUtils.VersionProperty property = PomUtils.findVersionProperty(module, dependency);
+        assertEquals("jfrog.version", property.name());
+        assertEquals(parent.getCanonicalFile(), property.declaringPom().getCanonicalFile());
+
+        PomUtils.setProperty(property.declaringPom(), property.name(), "2.41.9");
+        assertEquals("2.41.9", PomUtils.readDependencies(module).getFirst().getVersion());
+    }
+
+    @Test
+    void leavesTheParentUntouchedWhenTheVersionIsWrittenIntoTheModule() throws Exception {
+        File parent = temp.resolve("pom.xml").toFile();
+        Files.writeString(parent.toPath(), """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <project>
+                    <modelVersion>4.0.0</modelVersion>
+                    <groupId>example</groupId><artifactId>root</artifactId><version>1.0.0</version>
+                    <packaging>pom</packaging>
+                    <properties><jfrog.version>2.9.0</jfrog.version></properties>
+                </project>
+                """);
+        Path moduleDir = Files.createDirectory(temp.resolve("module"));
+        File module = moduleDir.resolve("pom.xml").toFile();
+        Files.writeString(module.toPath(), """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <project>
+                    <modelVersion>4.0.0</modelVersion>
+                    <parent>
+                        <groupId>example</groupId><artifactId>root</artifactId><version>1.0.0</version>
+                        <relativePath>../pom.xml</relativePath>
+                    </parent>
+                    <artifactId>module</artifactId>
+                    <dependencies>
+                        <dependency>
+                            <groupId>org.jfrog.buildinfo</groupId>
+                            <artifactId>build-info-extractor</artifactId>
+                            <version>${jfrog.version}</version>
+                        </dependency>
+                    </dependencies>
+                </project>
+                """);
+
+        PomUtils.setDependencyVersion(module, PomUtils.readDependencies(module).getFirst(), "2.41.9");
+
+        assertTrue(Files.readString(parent.toPath()).contains("<jfrog.version>2.9.0</jfrog.version>"));
+        assertTrue(Files.readString(module.toPath()).contains("<version>2.41.9</version>"));
+    }
+
+    @Test
+    void readsTheVersionAsThePomSpellsIt() throws Exception {
+        File pom = pom("""
+                <properties><apache-version>3.14.0</apache-version></properties>
+                <dependencies>
+                    <dependency>
+                        <groupId>org.apache.commons</groupId><artifactId>commons-lang3</artifactId>
+                        <version>${apache-version}</version>
+                    </dependency>
+                </dependencies>
+                """);
+
+        Dependency dependency = PomUtils.readDependencies(pom).getFirst();
+        assertEquals("3.14.0", dependency.getVersion());
+        assertEquals("${apache-version}", PomUtils.readRawVersion(pom, dependency));
     }
 
     @Test

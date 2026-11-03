@@ -21,6 +21,7 @@ import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.PosixFilePermission;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -33,7 +34,18 @@ import java.util.regex.Pattern;
  */
 public final class PomUtils {
 
+    /** Depth limits for the parent chain and for ${a} -> ${b} property chains. */
+    private static final int MAX_PARENT_DEPTH = 10;
+    private static final int MAX_PROPERTY_HOPS = 10;
+
     public record PomInfo(String groupId, String artifactId, String version) {
+    }
+
+    /**
+     * Where a dependency's {@code ${property}} version ultimately comes from: the property that
+     * holds the literal value, and the pom declaring it, which may be a parent pom.
+     */
+    public record VersionProperty(String name, File declaringPom, String value) {
     }
 
     private PomUtils() {
@@ -44,7 +56,7 @@ public final class PomUtils {
     /** Returns the direct dependencies of the pom, with ${property} versions resolved when possible. */
     public static @NotNull List<Dependency> readDependencies(@NotNull File pomFile) throws IOException {
         Element project = parse(pomFile);
-        Map<String, String> properties = readProperties(project);
+        Map<String, String> properties = readInheritedProperties(pomFile);
         List<Dependency> result = new ArrayList<>();
         Element dependencies = childElement(project, "dependencies");
         if (dependencies == null) {
@@ -56,9 +68,7 @@ public final class PomUtils {
             String version = childText(dep, "version");
             String type = childText(dep, "type");
             String classifier = childText(dep, "classifier");
-            if (version != null && version.startsWith("${") && version.endsWith("}")) {
-                version = properties.getOrDefault(version.substring(2, version.length() - 1), version);
-            }
+            version = resolveProperties(version, properties);
             if (groupId != null && artifactId != null) {
                 result.add(new Dependency(groupId, artifactId, version, null, type, classifier));
             }
@@ -290,13 +300,12 @@ public final class PomUtils {
             String newBody;
             if (versionTag.find()) {
                 String raw = body.substring(versionTag.start(1), versionTag.end(1)).trim();
-                if (raw.startsWith("${") && raw.endsWith("}")) {
-                    String property = raw.substring(2, raw.length() - 1);
-                    // A property can intentionally control several dependencies. Updating it
-                    // would make a one-row action silently rewrite all of them, so preserve the
-                    // property only when this dependency is its sole direct consumer.
-                    String updated = countPropertyReferences(content, property) == 1
-                            ? replacePropertyValue(content, property, newVersion) : null;
+                if (isPropertyReference(raw)) {
+                    VersionProperty property = findVersionProperty(pomFile, dependency);
+                    // A property declared in a parent pom is left to the caller: writing into
+                    // another file is its decision, not a side effect of this one.
+                    String updated = property != null && property.declaringPom().equals(pomFile)
+                            ? replacePropertyValue(content, property.name(), newVersion) : null;
                     if (updated != null) {
                         writeAtomically(path, updated);
                         return;
@@ -320,6 +329,55 @@ public final class PomUtils {
             return;
         }
         throw new IOException("Dependency " + dependency.getKey() + " not found in " + pomFile.getName());
+    }
+
+    /** Sets the value of a property declared in this pom's own &lt;properties&gt; block. */
+    public static synchronized void setProperty(@NotNull File pomFile,
+                                                @NotNull String property,
+                                                @NotNull String newValue) throws IOException {
+        Path path = pomFile.toPath();
+        String updated = replacePropertyValue(Files.readString(path, StandardCharsets.UTF_8),
+                property, newValue);
+        if (updated == null) {
+            throw new IOException("Property " + property + " is not declared in " + pomFile.getName());
+        }
+        writeAtomically(path, updated);
+    }
+
+    /**
+     * The property that holds this dependency's version, after following ${a} -&gt; ${b} chains
+     * and the parent poms. Null when the version is a literal, when the property is declared
+     * somewhere this plugin cannot see (a profile, or a parent resolved from the repository),
+     * or when another dependency reads the same property, where bumping it would quietly
+     * change more than the one dependency that was asked for. Plugins reading the property
+     * are not counted: carrying them along is what a shared version property is for.
+     */
+    public static @Nullable VersionProperty findVersionProperty(@NotNull File pomFile,
+                                                                @NotNull Dependency dependency)
+            throws IOException {
+        String value = readRawVersion(pomFile, dependency);
+        if (!isPropertyReference(value)) {
+            return null;
+        }
+        Map<String, String> properties = readInheritedProperties(pomFile);
+        List<String> chain = new ArrayList<>();
+        while (isPropertyReference(value) && chain.size() < MAX_PROPERTY_HOPS) {
+            String name = propertyName(value);
+            if (chain.contains(name)) {
+                return null; // ${a} -> ${b} -> ${a}
+            }
+            chain.add(name);
+            value = properties.get(name);
+            if (value == null) {
+                return null;
+            }
+        }
+        if (isPropertyReference(value) || dependencyReferences(pomFile, chain) != 1) {
+            return null;
+        }
+        String name = chain.get(chain.size() - 1);
+        File declaring = declaringPom(pomFile, name);
+        return declaring == null ? null : new VersionProperty(name, declaring, value);
     }
 
     /** Removes the dependency's whole &lt;dependency&gt; block; the rest of the file keeps its formatting. */
@@ -736,6 +794,104 @@ public final class PomUtils {
             count++;
         }
         return count;
+    }
+
+    /** How often the properties are read by a &lt;dependency&gt; in this pom or a parent of it. */
+    private static int dependencyReferences(@NotNull File pomFile,
+                                            @NotNull List<String> properties) throws IOException {
+        int count = 0;
+        for (File pom : pomChain(pomFile)) {
+            String searchable = maskIgnoredMarkup(Files.readString(pom.toPath(), StandardCharsets.UTF_8));
+            Matcher block = elementBlockPattern("dependency").matcher(searchable);
+            while (block.find()) {
+                String body = searchable.substring(block.start(1), block.end(1));
+                for (String property : properties) {
+                    count += countPropertyReferences(body, property);
+                }
+            }
+        }
+        return count;
+    }
+
+    /** The nearest pom declaring the property in its own &lt;properties&gt; block, or null. */
+    private static @Nullable File declaringPom(@NotNull File pomFile,
+                                               @NotNull String property) throws IOException {
+        for (File pom : pomChain(pomFile)) {
+            if (readProperties(parse(pom)).containsKey(property)) {
+                return pom;
+            }
+        }
+        return null;
+    }
+
+    /** The pom itself followed by its parents, nearest first. */
+    private static @NotNull List<File> pomChain(@NotNull File pomFile) throws IOException {
+        List<File> chain = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        File current = pomFile;
+        while (current != null && chain.size() < MAX_PARENT_DEPTH && seen.add(current.getAbsolutePath())) {
+            chain.add(current);
+            current = readParentPomFile(current);
+        }
+        return chain;
+    }
+
+    /** The pom's own properties, with the ones its parents declare as fallbacks. */
+    private static @NotNull Map<String, String> readInheritedProperties(@NotNull File pomFile)
+            throws IOException {
+        Map<String, String> result = new HashMap<>();
+        for (File pom : pomChain(pomFile)) {
+            readProperties(parse(pom)).forEach(result::putIfAbsent); // the nearest declaration wins
+        }
+        return result;
+    }
+
+    /** Follows ${property} references, chains included, as far as the known properties allow. */
+    private static @Nullable String resolveProperties(@Nullable String version,
+                                                      @NotNull Map<String, String> properties) {
+        String value = version;
+        for (int hop = 0; hop < MAX_PROPERTY_HOPS && isPropertyReference(value); hop++) {
+            String resolved = properties.get(propertyName(value));
+            if (resolved == null) {
+                return value;
+            }
+            value = resolved;
+        }
+        return value;
+    }
+
+    private static boolean isPropertyReference(@Nullable String value) {
+        return value != null && value.startsWith("${") && value.endsWith("}") && value.length() > 3;
+    }
+
+    private static @NotNull String propertyName(@NotNull String reference) {
+        return reference.substring(2, reference.length() - 1);
+    }
+
+    /**
+     * The version exactly as the pom spells it, so a ${property} is visible instead of the value
+     * it resolves to. Null when the pom does not declare this dependency or gives it no version.
+     */
+    public static @Nullable String readRawVersion(@NotNull File pomFile,
+                                                  @NotNull Dependency dependency) throws IOException {
+        Element dependencies = childElement(parse(pomFile), "dependencies");
+        if (dependencies == null) {
+            return null;
+        }
+        for (Element dep : childElements(dependencies, "dependency")) {
+            String groupId = childText(dep, "groupId");
+            String artifactId = childText(dep, "artifactId");
+            if (groupId == null || artifactId == null) {
+                continue;
+            }
+            String version = childText(dep, "version");
+            Dependency candidate = new Dependency(groupId, artifactId, version, null,
+                    childText(dep, "type"), childText(dep, "classifier"));
+            if (candidate.getKey().equals(dependency.getKey())) {
+                return version;
+            }
+        }
+        return null;
     }
 
     private static @Nullable String firstTagValue(@NotNull String body, @NotNull String tag) {
