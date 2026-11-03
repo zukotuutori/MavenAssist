@@ -41,6 +41,7 @@ public class DependencyDetailsDialog extends DialogWrapper {
 
     private final JBLabel newestLabel = new JBLabel("fetching...");
     private final JButton updateButton = new JButton("Update to Newest Version");
+    private final JButton allVersionsButton = new JButton("Show All Available Versions...");
     private final JButton changeVersionButton = new JButton("Change Version...");
     private final JPanel buttonsStack = new JPanel();
 
@@ -146,10 +147,12 @@ public class DependencyDetailsDialog extends DialogWrapper {
                 close(OK_EXIT_CODE);
             }
         });
+        allVersionsButton.addActionListener(e -> chooseVersionFromList());
         changeVersionButton.addActionListener(e -> changeVersion());
 
         buttonsStack.setLayout(new javax.swing.BoxLayout(buttonsStack, javax.swing.BoxLayout.Y_AXIS));
         buttonsStack.add(updateButton);
+        buttonsStack.add(allVersionsButton);
         buttonsStack.add(changeVersionButton);
         gbc.gridy = row;
         gbc.gridx = 0;
@@ -197,6 +200,17 @@ public class DependencyDetailsDialog extends DialogWrapper {
                 : updateAvailable ? "" : "  (no newer stable release)"));
         newestLabel.setFont(newestLabel.getFont().deriveFont(Font.BOLD));
         updateButton.setEnabled(updateAvailable);
+    }
+
+    /** Applies a version picked from the full Maven Central list. */
+    private void chooseVersionFromList() {
+        String chosen = VersionListDialog.choose(project, getContentPanel(),
+                dependency.getGroupId(), dependency.getArtifactId(), dependency.getVersion());
+        if (chosen == null) {
+            return;
+        }
+        versionApplier.accept(dependency, chosen);
+        close(OK_EXIT_CODE);
     }
 
     private void changeVersion() {

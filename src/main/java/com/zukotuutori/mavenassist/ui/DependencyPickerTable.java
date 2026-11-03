@@ -251,12 +251,24 @@ class DependencyPickerTable extends ThemedTable {
         return custom == null ? "Newest" : custom;
     }
 
-    /** "Newest version" clears the pin, "Custom version..." asks for one. */
+    /**
+     * "Newest version" clears the pin, "Show all available versions..." pins one from the full
+     * Maven Central list, "Custom version..." asks for one.
+     */
     private void showVersionMenu(@NotNull Dependency d, int viewRow) {
         JPopupMenu menu = new JPopupMenu();
         JMenuItem newest = new JMenuItem("Newest version");
         newest.addActionListener(e -> clearCustomVersion(d.getKey()));
         menu.add(newest);
+        JMenuItem all = new JMenuItem("Show all available versions...");
+        all.addActionListener(e -> {
+            String chosen = VersionListDialog.choose(null, this,
+                    d.getGroupId(), d.getArtifactId(), customVersions.get(d.getKey()));
+            if (chosen != null) {
+                setCustomVersion(d.getKey(), chosen);
+            }
+        });
+        menu.add(all);
         JMenuItem custom = new JMenuItem("Custom version...");
         custom.addActionListener(e -> {
             String input = VersionInput.ask(null, this,

@@ -582,7 +582,17 @@ public class DependencyTablePanel extends JPanel {
         applyVersion(row.dependency, input);
     }
 
-    /** The "newest / custom version" menu of a row's Update button. */
+    /** Lets the user pick from every version Maven Central publishes for the row's artifact. */
+    private void chooseVersionOfRow(@NotNull Row row) {
+        String chosen = VersionListDialog.choose(project, this,
+                row.dependency.getGroupId(), row.dependency.getArtifactId(),
+                row.dependency.getVersion());
+        if (chosen != null) {
+            applyVersion(row.dependency, chosen);
+        }
+    }
+
+    /** The "newest / all available / custom version" menu of a row's Update button. */
     private void showUpdateMenu(int modelRow, int viewRow, int viewColumn) {
         if (modelRow < 0 || modelRow >= visibleRows.size()) {
             return;
@@ -592,6 +602,9 @@ public class DependencyTablePanel extends JPanel {
         javax.swing.JMenuItem newest = new javax.swing.JMenuItem("Newest version");
         newest.addActionListener(e -> updateRowToNewest(row));
         menu.add(newest);
+        javax.swing.JMenuItem all = new javax.swing.JMenuItem("Show all available versions...");
+        all.addActionListener(e -> chooseVersionOfRow(row));
+        menu.add(all);
         javax.swing.JMenuItem custom = new javax.swing.JMenuItem("Custom version...");
         custom.addActionListener(e -> changeVersionOfRow(row));
         menu.add(custom);
@@ -1187,7 +1200,7 @@ public class DependencyTablePanel extends JPanel {
     private static class UpdateButtonRenderer extends JButton implements TableCellRenderer {
         UpdateButtonRenderer() {
             super("Update");
-            setToolTipText("Update this dependency: newest version or a custom one");
+            setToolTipText("Update this dependency: newest version, one from the full list, or a custom one");
         }
 
         @Override

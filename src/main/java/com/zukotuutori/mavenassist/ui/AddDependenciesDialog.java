@@ -286,10 +286,26 @@ public class AddDependenciesDialog extends DialogWrapper {
         }
         if (input.isEmpty()) {
             versionOverrides.remove(dependency.getKey());
+            rowConfigs.remove(dependency.getKey()); // rebuilt from the new pin on the next step change
+            picker.refresh();
         } else {
-            versionOverrides.put(dependency.getKey(), input);
-            picker.setChecked(dependency.getKey(), true); // picking a version implies you want the dependency
+            pinVersion(dependency, input);
         }
+    }
+
+    /** Pins a version chosen from the full Maven Central list. */
+    private void chooseVersionFromList(@NotNull Dependency dependency) {
+        String current = versionOverrides.getOrDefault(dependency.getKey(), dependency.getVersion());
+        String chosen = VersionListDialog.choose(project, picker,
+                dependency.getGroupId(), dependency.getArtifactId(), current);
+        if (chosen != null) {
+            pinVersion(dependency, chosen);
+        }
+    }
+
+    private void pinVersion(@NotNull Dependency dependency, @NotNull String version) {
+        versionOverrides.put(dependency.getKey(), version);
+        picker.setChecked(dependency.getKey(), true); // picking a version implies you want the dependency
         rowConfigs.remove(dependency.getKey()); // rebuilt from the new pin on the next step change
         picker.refresh();
     }
@@ -333,7 +349,7 @@ public class AddDependenciesDialog extends DialogWrapper {
 
     /**
      * Details of one addable dependency: coordinates, catalog/pinned version and the
-     * newest version from Maven Central, plus "Change Version..." to pin one.
+     * newest version from Maven Central, plus "All Versions..." and "Change Version..." to pin one.
      */
     private class AddableDetailsDialog extends DialogWrapper {
         private final Dependency dependency;
@@ -388,15 +404,25 @@ public class AddDependenciesDialog extends DialogWrapper {
             newestLabel.setFont(newestLabel.getFont().deriveFont(Font.BOLD));
             panel.add(newestLabel, gbc);
 
+            JPanel versionButtons = new JPanel(new java.awt.FlowLayout(
+                    java.awt.FlowLayout.LEFT, JBUI.scale(4), 0));
+            JButton listButton = new JButton("All Versions...");
+            listButton.setToolTipText("Pick from every version Maven Central publishes");
+            listButton.addActionListener(e -> {
+                chooseVersionFromList(dependency);
+                updatePinnedLabel();
+            });
+            versionButtons.add(listButton);
             JButton pinButton = new JButton("Change Version...");
             pinButton.addActionListener(e -> {
                 changeVersion(dependency);
                 updatePinnedLabel();
             });
+            versionButtons.add(pinButton);
             gbc.gridy = row;
             gbc.gridx = 0;
             gbc.gridwidth = 2;
-            panel.add(pinButton, gbc);
+            panel.add(versionButtons, gbc);
             return panel;
         }
 
