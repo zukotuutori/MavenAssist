@@ -31,8 +31,21 @@ table, or filter it down to *Only auto update*. **Check for Updates** fills in t
 newest version for every row. **Update All** asks whether to update everything, cancel, or choose the
 dependencies to update from a checkbox list.
 
-Press **Update** beside a single version to choose the newest stable release or type a specific one. Maven Assist
+Press **Update** beside a single version to choose the newest stable release, pick from **all available
+versions**, or type a specific one. The version list shows everything Maven Central publishes for that
+artifact, newest first, with a filter field and the version currently in your pom marked. Release
+candidates and snapshots stay in it: when you pick a version yourself, nothing is hidden. Maven Assist
 rewrites the pom, runs `mvn compile`, and reports the result as a notification.
+
+Hovering a row shows a **⋯** handle at its right end. Clicking it, or right-clicking anywhere on the row,
+opens every action for that dependency in one menu: details, newest version, the version list, a custom
+version, auto update on or off, and delete. Select several rows with Ctrl-click or Shift-click and the
+same menu acts on all of them at once, asking once rather than once per dependency.
+
+The same actions are available directly in `pom.xml`. Right-click anywhere inside a `<dependency>` block
+and choose **Maven Assist** in the editor menu; select one or more blocks first to act on all of them. Only
+the project's own dependencies are offered, so entries under `dependencyManagement`, profiles and plugins
+stay untouched, as in the table.
 
 ### Keep dependencies fresh automatically
 
@@ -48,8 +61,8 @@ IntelliJ safe mode.
 ### Add and remove dependencies
 
 Adding is a two-step flow: pick what you need, then configure each dependency individually: newest
-version, a pinned version, or auto-update. Removing is a red trash button per row, plus a multi-select mode
-for clearing out several at once.
+version, a pinned version chosen from the full Maven Central list or typed in, or auto-update. Removing is
+a red trash button per row, the row menu, or a multi-select mode for clearing out several at once.
 
 ### Build your own catalog
 
@@ -81,10 +94,10 @@ the project's own `<dependencies>` block.
 Maven Assist itself makes direct network requests only for a feature you invoke or a dependency you
 explicitly flag for automatic update:
 
-- **`repo1.maven.org`**: when checking updates, choosing **Newest**, opening version details,
-  creating/adding a dependency configured for newest, or running an enabled auto-update pass. The
-  artifact's Maven repository metadata is requested, so its `groupId` and `artifactId` are sent; private
-  coordinates can therefore reveal internal naming.
+- **`repo1.maven.org`**: when checking updates, choosing **Newest**, opening the list of available
+  versions, opening version details, creating/adding a dependency configured for newest, or running an
+  enabled auto-update pass. The artifact's Maven repository metadata is requested, so its `groupId` and
+  `artifactId` are sent; private coordinates can therefore reveal internal naming.
   Merely opening or refreshing the tool window sends nothing, and custom pinned versions are not checked.
 - **`dlcdn.apache.org` / `archive.apache.org`**: to download Maven, if you accept the offer to install it.
 

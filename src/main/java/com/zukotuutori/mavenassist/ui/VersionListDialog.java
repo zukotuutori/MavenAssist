@@ -50,17 +50,20 @@ final class VersionListDialog extends DialogWrapper {
      *
      * @return the chosen version, or null when nothing could be fetched or the dialog was cancelled.
      */
-    static @Nullable String choose(@Nullable Project project, @NotNull Component parent,
+    static @Nullable String choose(@Nullable Project project, @Nullable Component parent,
                                    @NotNull String groupId, @NotNull String artifactId,
                                    @Nullable String currentVersion) {
         List<String> available = ProgressManager.getInstance().runProcessWithProgressSynchronously(
                 () -> MavenCentralClient.getAvailableVersions(groupId, artifactId),
                 "Loading Versions from Maven Central", true, project);
         if (available == null || available.isEmpty()) {
-            Messages.showErrorDialog(parent,
-                    "No versions found for " + groupId + ":" + artifactId + " on Maven Central.\n\n"
-                            + "The artifact may be unknown there, or Maven Central could not be reached.",
-                    "No Versions Available");
+            String message = "No versions found for " + groupId + ":" + artifactId + " on Maven Central.\n\n"
+                    + "The artifact may be unknown there, or Maven Central could not be reached.";
+            if (parent != null) {
+                Messages.showErrorDialog(parent, message, "No Versions Available");
+            } else {
+                Messages.showErrorDialog(project, message, "No Versions Available");
+            }
             return null;
         }
         VersionListDialog dialog =
@@ -68,7 +71,7 @@ final class VersionListDialog extends DialogWrapper {
         return dialog.showAndGet() ? dialog.list.getSelectedValue() : null;
     }
 
-    private VersionListDialog(@Nullable Project project, @NotNull Component parent,
+    private VersionListDialog(@Nullable Project project, @Nullable Component parent,
                               @NotNull String groupId, @NotNull String artifactId,
                               @Nullable String currentVersion, @NotNull List<String> oldestFirst) {
         super(project, parent, false, IdeModalityType.IDE);

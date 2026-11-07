@@ -4,41 +4,30 @@
     <vendor url="https://github.com/zukotuutori/MavenAssist">zukotuutori</vendor>
 
     <change-notes><![CDATA[
-        <h3>Maven Assist 2.0.0: What's New Since Version 1.0.1?</h3>
-        <p>Maven Assist 2.0.0 makes automatic dependency updates more controlled, secure, and flexible.
-            You can now decide exactly when automatic updates run: when saving, when opening a project,
-            before <i>MVN Clean Install</i>, or through a custom keyboard shortcut.</p>
-        <p>Newest-version checks now read Maven Central's current repository metadata instead of its stale
-            legacy search index, so stable releases such as OkHttp 5.x are detected correctly. Failed
-            lookups are reported rather than incorrectly claiming that every dependency is up to date.</p>
-        <p>A new <b>Template</b> menu is always available in the bottom bar. From either the create or
-            manage view, <b>Save As...</b> stores the current project setup, dependencies, and version
-            choices. <b>Export...</b> copies the current project's existing <code>pom.xml</code>, while
-            <b>Import...</b> turns a local <code>pom.xml</code> into a saved template.</p>
-        <p><b>Update All</b> now asks before changing the pom. You can update everything, cancel, or choose
-            the exact dependencies to update from a checkbox list. Toggling auto update also asks for
-            confirmation for the selected dependency.</p>
-        <p>Every automatic update now asks by default. Maven Assist shows the dependency, current and new
-            versions, and a link to the release information. Choose <b>Yes</b>, <b>No</b>, or
-            <b>Never</b>, which disables auto update only for that dependency. Minor- and patch-update
-            confirmations can be disabled under <b>Customize...</b>, while major updates always require
-            approval. Automatic updates also use only stable versions that are actually newer than the
-            currently installed version.</p>
-        <p>Editing <code>pom.xml</code> files is now significantly more robust. Dependencies with different
-            Maven types or classifiers are handled independently. Shared version properties no longer
-            cause unrelated dependencies to be changed accidentally. Entries in
-            <code>dependencyManagement</code>, profiles, build and reporting sections, as well as
-            dependencies belonging to Maven plugins, remain untouched. Existing <code>pom.xml</code>
-            files are no longer overwritten during creation.</p>
-        <p>Privacy and security have also been improved. Automatic actions respect IntelliJ Safe Mode,
-            project information is stored without absolute user paths, and network requests are made only
-            for features you explicitly use. The optional Maven download is verified against a pinned
-            SHA-512 checksum and now includes size limits, timeouts, and reliable cleanup of temporary
-            files.</p>
-        <p>The entire interface now automatically follows the active IntelliJ theme, including custom and
-            third-party themes. Custom versions also work with private Maven repositories and are no
-            longer incorrectly checked against Maven Central. Numerous smaller issues involving concurrent
-            updates, builds, notifications, and POM modifications have been fixed as well.</p>
+        <h3>Maven Assist 2.1.1: What's New Since Version 2.0.0?</h3>
+        <p>Picking a version is no longer a guessing game. Next to <b>Newest version</b> and
+            <b>Custom version...</b> there is now <b>Show all available versions...</b>, which lists every
+            version Maven Central publishes for that artifact, newest first. A filter field narrows long
+            lists, the version currently in your pom is marked and preselected, and a double-click applies
+            one. Unlike the automatic update path, this list deliberately keeps release candidates,
+            milestones and snapshots: when you pick a version yourself, nothing should be hidden from you.
+            The list is available wherever you choose a version, in the update menu of the dependency
+            table, in a dependency's details, and in both steps of <b>Add Dependencies</b>.</p>
+        <p>Every action for a dependency now sits in one place. Move the mouse over a row and a
+            <b>...</b> handle appears at its right end; a click on it, or a right-click anywhere on the
+            row, opens the full menu: details, update to the newest version, the version list, a custom
+            version, auto update on or off, and delete. The existing <i>Update</i>, <i>Details</i> and
+            trash buttons are unchanged, so nothing you are used to has moved.</p>
+        <p>The menu also works on several dependencies at once. Select them with Ctrl-click or
+            Shift-click and the menu offers what is meaningful in bulk: update all of them to their newest
+            version, turn auto update on or off for all of them, or delete all of them. Each of these asks
+            once instead of once per dependency, and runs as a single pass with one progress bar, one
+            answer to the parent-property question, one summary and one build.</p>
+        <p>All of this is now available right inside <code>pom.xml</code> as well. Right-click anywhere in a
+            <code>&lt;dependency&gt;</code> block and the editor menu has a <b>Maven Assist</b> entry with the
+            same actions as the table. Select one or more blocks first and it acts on all of them. Only the
+            project's own dependencies are offered; entries under <code>dependencyManagement</code>,
+            profiles and plugins are left alone, exactly as in the table.</p>
     ]]></change-notes>
 
     <description><![CDATA[
@@ -61,7 +50,14 @@
                 point at a parent pom, tick the dependencies you want, and press one button. Save the whole
                 setup as a template and reuse it in every project.</li>
             <li><b>Updates dependencies with one click.</b> Every row has an <i>Update</i> button that moves
-                it to the newest stable release and rebuilds. <i>Update All</i> does the whole pom at once.</li>
+                it to the newest stable release and rebuilds. <i>Update All</i> does the whole pom at once.
+                Need a particular version instead? Browse every version Maven Central publishes for that
+                artifact and pick one.</li>
+            <li><b>Every action where the dependency is.</b> Hover a row for its <b>...</b> handle, or
+                right-click it, and you get everything for that dependency in one menu. Select several
+                rows and the menu updates, flags or deletes all of them at once. The same menu is in the
+                <code>pom.xml</code> editor: right-click inside a <code>&lt;dependency&gt;</code> block, or on
+                a selection spanning several, and pick <b>Maven Assist</b>.</li>
             <li><b>Keeps dependencies fresh automatically.</b> Flag any dependency and it moves to the newest
                 version at the moments you pick. Every update asks by default, and major updates always
                 require approval.</li>
@@ -101,9 +97,21 @@
             <li><b>Check for Updates</b> fills the <i>Newest Version</i> column for every row.
                 <b>Update All</b> then lets you update everything, cancel, or select the exact dependencies
                 from a checkbox list. A single build runs after the chosen updates.</li>
-            <li>Press <b>Update</b> beside any version and pick <b>Newest version</b> or
-                <b>Custom version…</b>. Maven Assist rewrites the pom, runs <code>mvn compile</code>, and
-                tells you how it went.</li>
+            <li>Press <b>Update</b> beside any version and pick <b>Newest version</b>,
+                <b>Show all available versions…</b> or <b>Custom version…</b>. Maven Assist rewrites the
+                pom, runs <code>mvn compile</code>, and tells you how it went.</li>
+            <li><b>Show all available versions…</b> lists every version Maven Central publishes for that
+                artifact, newest first, with a filter field for long lists and the version currently in
+                your pom marked. Release candidates, milestones and snapshots stay in the list: when you
+                pick a version yourself, nothing is hidden from you.</li>
+            <li><b>Hover any row</b> and a <b>...</b> handle appears at its right end; clicking it, or
+                right-clicking anywhere on the row, opens every action for that dependency in one menu:
+                details, newest version, the version list, a custom version, auto update on or off, and
+                delete.</li>
+            <li><b>Select several rows</b> with Ctrl-click or Shift-click and that same menu acts on all of
+                them: update them all to their newest version, turn auto update on or off for all of them,
+                or delete them all. You are asked once, not once per dependency, and a single build runs
+                at the end.</li>
             <li>The <b>red trash button</b> on each row deletes that dependency after a confirmation. The
                 trash button <b>next to the search bar</b> turns on multi-select, so you can clear out
                 several at once.</li>
@@ -129,7 +137,9 @@
         <ul>
             <li><b>Step 1: <strong>pick</strong>.</b> Search and tick what you need, or take everything at once with
                 <i>Select All</i> / <i>Select None</i>. <i>Details</i> shows the group id, artifact id,
-                the catalog version and the newest one from Maven Central.</li>
+                the catalog version and the newest one from Maven Central, and lets you pin a version
+                right there, typed in or picked from the full Maven Central list. The <i>Version</i>
+                button on each row offers the same three choices.</li>
             <li><b>Step 2: <strong>configure</strong>.</b> Press <b>Next</b> and every selected dependency gets its own
                 block: use the newest version, pin a specific one, and decide whether it should auto-update.
                 <b>Back</b> returns to the list without losing anything.</li>
@@ -139,7 +149,8 @@
         <h2>Auto update, on your schedule</h2>
         <p>The table has an <b>auto update</b> column: <span style="color:green;">green</span> means on,
         <span style="color:red;">red</span> means off. Clicking either state asks for confirmation before
-        changing it. Maven Assist then checks the green-flagged dependencies against Maven Central and bumps
+        changing it, and the row menu carries the same switch, for one dependency or for everything you
+        have selected. Maven Assist then checks the green-flagged dependencies against Maven Central and bumps
         any that fell behind to a newer stable release, pom rewritten, build started.</p>
         <p><b>You decide when that happens.</b> Press <b>Customize...</b> at the bottom of the tool window
         and tick any combination of:</p>
@@ -187,9 +198,9 @@
         <p>Maven Assist itself makes direct network requests only for features you invoke or dependencies
         you explicitly flag for automatic update:</p>
         <ul>
-            <li><b>repo1.maven.org:</b> when checking updates, choosing <i>Newest</i>, viewing version
-                details, creating/adding a dependency configured to use newest, or running an enabled
-                auto-update trigger. The artifact's Maven repository metadata is requested, so a lookup
+            <li><b>repo1.maven.org:</b> when checking updates, choosing <i>Newest</i>, opening the list of
+                available versions, viewing version details, creating/adding a dependency configured to
+                use newest, or running an enabled auto-update trigger. The artifact's Maven repository metadata is requested, so a lookup
                 sends that dependency's <code>groupId</code> and <code>artifactId</code>. These coordinates
                 can reveal private naming conventions, so no
                 lookup is started merely by opening or refreshing the tool window. Custom pinned versions
@@ -205,6 +216,8 @@
     ]]></description>
 
     <depends>com.intellij.modules.platform</depends>
+    <!-- The pom.xml editor menu reads the dependency blocks through XML PSI. -->
+    <depends>com.intellij.modules.xml</depends>
 
     <extensions defaultExtensionNs="com.intellij">
         <toolWindow id="Maven Assist"
@@ -223,5 +236,14 @@
                 class="com.zukotuutori.mavenassist.actions.RunAutoUpdateAction"
                 text="Maven Assist: Run Auto Update"
                 description="Updates every dependency flagged &quot;auto update&quot; to its newest stable version"/>
+
+        <!-- Right-click inside a <dependency> block, or on a selection spanning several. -->
+        <group id="MavenAssist.PomEditorMenu"
+               class="com.zukotuutori.mavenassist.actions.PomDependencyActionGroup"
+               popup="true"
+               text="Maven Assist"
+               icon="/icons/mavenAssist.svg">
+            <add-to-group group-id="EditorPopupMenu" anchor="first"/>
+        </group>
     </actions>
 </idea-plugin>

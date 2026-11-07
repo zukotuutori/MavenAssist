@@ -54,7 +54,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Shown when the chosen directory contains a pom.xml: a compact list of all
@@ -142,10 +141,18 @@ public class DependencyTablePanel extends JPanel {
         return tableFields.size() + 1 + colOffset();
     }
 
-    /** Model index of the delete-button column (always the last one). */
+    /** Model index of the delete-button column. */
     private int deleteColumn() {
         return tableFields.size() + 2 + colOffset();
     }
+
+    /** Model index of the "⋯" actions column (always the last one). */
+    private int actionsColumn() {
+        return tableFields.size() + 3 + colOffset();
+    }
+
+    /** View row the mouse is currently over, or -1; only that row shows its "⋯" handle. */
+    private int hoveredRow = -1;
 
     private File pomFile;
 
@@ -290,51 +297,12 @@ public class DependencyTablePanel extends JPanel {
             Notifier.warn(project, "Tick the dependencies you want to delete first.");
             return;
         }
-        StringBuilder names = new StringBuilder();
-        for (Dependency dep : toDelete) {
-            names.append('\n').append(dep.getKey());
-        }
-        int answer = com.intellij.openapi.ui.Messages.showYesNoDialog(project,
-                "Delete " + toDelete.size() + " dependencies from pom.xml?" + names
-                        + "\n\nThe whole <dependency> entries will be removed.",
-                "Delete Dependencies", "Delete", "Cancel",
-                com.intellij.openapi.ui.Messages.getWarningIcon());
-        if (answer != com.intellij.openapi.ui.Messages.YES) {
+        DependencyActions actions = actions();
+        if (actions == null || !actions.confirmDelete(toDelete)) {
             return;
         }
         setDeleteMode(false);
-        new Task.Backgroundable(project, "Maven Assist: Deleting dependencies", true) {
-            @Override
-            public void run(@NotNull ProgressIndicator indicator) {
-                int deleted = 0;
-                List<String> failures = new ArrayList<>();
-                AutoUpdateService autoService = AutoUpdateService.getInstance(project);
-                for (Dependency dep : toDelete) {
-                    indicator.checkCanceled();
-                    indicator.setText("Deleting " + dep.getKey() + "...");
-                    try {
-                        PomWriteAction.run(project, pom, "Delete Maven dependency",
-                                () -> PomUtils.removeDependency(pom, dep));
-                        autoService.setAutoUpdate(pom, dep.getKey(), false);
-                        deleted++;
-                    } catch (IOException e) {
-                        failures.add(dep.getKey() + ": " + e.getMessage());
-                    }
-                }
-                if (!failures.isEmpty()) {
-                    Notifier.error(project, "Could not delete:\n" + String.join("\n", failures));
-                }
-                if (deleted == 0) {
-                    return;
-                }
-                Notifier.info(project, "Deleted " + deleted + " dependencies from pom.xml. Building...");
-                ApplicationManager.getApplication().invokeLater(() -> {
-                    LocalFileSystem.getInstance().refreshAndFindFileByIoFile(pom);
-                    reload();
-                });
-                MavenBuildRunner.build(project, pom.getParentFile(), null);
-            }
-        }.queue();
+        actions.runDelete(toDelete);
     }
 
     /** The filter menu that pops up under the filter button. */
@@ -469,8 +437,9 @@ public class DependencyTablePanel extends JPanel {
     private @NotNull JBTable buildTable() {
         JBTable table = new ThemedTable(model);
 
-        // Clicks: "Auto Update" cell toggles the flag, "Update" cell opens the version menu.
-        table.addMouseListener(new MouseAdapter() {
+        // Clicks: "Auto Update" cell toggles the flag, "Update" cell opens the version menu,
+        // the "⋯" cell and a right-click anywhere open the full action menu.
+        MouseAdapter mouse = new MouseAdapter() {
             @Override
             public void mouseClicked(MouseEvent e) {
                 int row = table.rowAtPoint(e.getPoint());
@@ -486,9 +455,48 @@ public class DependencyTablePanel extends JPanel {
                     showUpdateMenu(table.convertRowIndexToModel(row), row, column);
                 } else if (modelColumn == deleteColumn()) {
                     confirmAndDelete(table.convertRowIndexToModel(row));
+                } else if (modelColumn == actionsColumn()) {
+                    java.awt.Rectangle cell = table.getCellRect(row, column, true);
+                    selectIfUnselected(row);
+                    showRowActionsMenu(cell.x, cell.y + cell.height);
                 }
             }
-        });
+
+            // A popup trigger is mousePressed on some platforms and mouseReleased on others.
+            @Override
+            public void mousePressed(MouseEvent e) {
+                maybePopup(e);
+            }
+
+            @Override
+            public void mouseReleased(MouseEvent e) {
+                maybePopup(e);
+            }
+
+            private void maybePopup(MouseEvent e) {
+                if (!e.isPopupTrigger()) {
+                    return;
+                }
+                int row = table.rowAtPoint(e.getPoint());
+                if (row < 0) {
+                    return;
+                }
+                selectIfUnselected(row);
+                showRowActionsMenu(e.getX(), e.getY());
+            }
+
+            @Override
+            public void mouseMoved(MouseEvent e) {
+                setHoveredRow(table.rowAtPoint(e.getPoint()));
+            }
+
+            @Override
+            public void mouseExited(MouseEvent e) {
+                setHoveredRow(-1);
+            }
+        };
+        table.addMouseListener(mouse);
+        table.addMouseMotionListener(mouse);
         return table;
     }
 
@@ -515,6 +523,25 @@ public class DependencyTablePanel extends JPanel {
         table.getColumnModel().getColumn(deleteColumn())
                 .setCellRenderer(new TablePills.DeleteRenderer("Delete this dependency from the pom"));
         table.getColumnModel().getColumn(deleteColumn()).setMaxWidth(JBUI.scale(44));
+        table.getColumnModel().getColumn(actionsColumn()).setCellRenderer(new RowActionsRenderer());
+        table.getColumnModel().getColumn(actionsColumn()).setMaxWidth(JBUI.scale(30));
+    }
+
+    /**
+     * The "⋯" handle. It is drawn only on the row the mouse is over, so the column stays quiet
+     * until it is needed, and a click on it opens the same menu as a right-click.
+     */
+    private class RowActionsRenderer extends DefaultTableCellRenderer {
+        @Override
+        public Component getTableCellRendererComponent(JTable source, Object value, boolean isSelected,
+                                                       boolean hasFocus, int row, int column) {
+            super.getTableCellRendererComponent(source, "", isSelected, false, row, column);
+            setHorizontalAlignment(SwingConstants.CENTER);
+            boolean hovered = row == hoveredRow;
+            setIcon(hovered ? AllIcons.Actions.More : null);
+            setToolTipText(hovered ? "All actions for this dependency" : null);
+            return this;
+        }
     }
 
     // ------------------------------------------------ details-dialog actions in the main window
@@ -522,73 +549,170 @@ public class DependencyTablePanel extends JPanel {
     /** The dependency selected in the table, or null (with a hint) if there is no selection. */
 
     private void updateRowToNewest(@NotNull Row row) {
-        Dependency dep = row.dependency;
-        String cached = row.latest;
-        File pom = pomFile;
-        new Task.Backgroundable(project, "Maven Assist: Fetching newest version of " + dep.getKey(), true) {
-            @Override
-            public void run(@NotNull ProgressIndicator indicator) {
-                String latest = cached.isEmpty() || "?".equals(cached)
-                        ? MavenCentralClient.getLatestVersion(dep.getGroupId(), dep.getArtifactId())
-                        : cached;
-                if (latest == null) {
-                    Notifier.warn(project, "Could not determine the newest version of " + dep.getKey() + ".");
-                    return;
-                }
-                if (dep.getVersion().isBlank()) {
-                    Notifier.warn(project, dep.getKey() + " is managed by a parent/BOM. "
-                            + "Update that version source instead of adding an overriding <version>.");
-                    return;
-                }
-                if (!VersionPolicy.isUpgrade(dep.getVersion(), latest)) {
-                    Notifier.info(project, dep.getKey() + " is already at the newest stable version"
-                            + versionSource(pom, dep) + ".");
-                    return;
-                }
-                applyVersion(dep, latest);
-            }
-        }.queue();
-    }
-
-    /**
-     * Names the property behind a version, so "already at the newest version" does not look like
-     * the plugin failing to update a ${property} it simply had no newer version for.
-     */
-    private static @NotNull String versionSource(@Nullable File pom, @NotNull Dependency dep) {
-        if (pom == null) {
-            return "";
-        }
-        try {
-            String raw = PomUtils.readRawVersion(pom, dep);
-            if (raw == null || !raw.startsWith("${")) {
-                return "";
-            }
-            PomUtils.VersionProperty property = PomUtils.findVersionProperty(pom, dep);
-            String where = property == null || property.declaringPom().equals(pom)
-                    ? "" : " in " + property.declaringPom().getAbsolutePath();
-            return " (" + dep.getVersion() + ", from " + raw + where + ")";
-        } catch (IOException e) {
-            return "";
+        DependencyActions actions = actions();
+        if (actions != null) {
+            actions.updateToNewest(row.dependency, row.latest);
         }
     }
 
     private void changeVersionOfRow(@NotNull Row row) {
-        String input = VersionInput.ask(project, this,
-                row.dependency.getGroupId(), row.dependency.getArtifactId(),
-                "Custom version for " + row.dependency.getKey() + ":", row.dependency.getVersion());
-        if (input == null || input.isEmpty()) {
-            return;
+        DependencyActions actions = actions();
+        if (actions != null) {
+            actions.askCustomVersion(row.dependency);
         }
-        applyVersion(row.dependency, input);
     }
 
     /** Lets the user pick from every version Maven Central publishes for the row's artifact. */
     private void chooseVersionOfRow(@NotNull Row row) {
-        String chosen = VersionListDialog.choose(project, this,
-                row.dependency.getGroupId(), row.dependency.getArtifactId(),
-                row.dependency.getVersion());
-        if (chosen != null) {
-            applyVersion(row.dependency, chosen);
+        DependencyActions actions = actions();
+        if (actions != null) {
+            actions.chooseFromAllVersions(row.dependency);
+        }
+    }
+
+    /** Actions for the current pom, anchored on this panel and reloading the table after a write. */
+    private @Nullable DependencyActions actions() {
+        return pomFile == null ? null : new DependencyActions(project, pomFile, this, this::reload);
+    }
+
+    /** Repaints the "⋯" cell of the row the mouse left and of the one it entered. */
+    private void setHoveredRow(int viewRow) {
+        if (viewRow == hoveredRow) {
+            return;
+        }
+        int previous = hoveredRow;
+        hoveredRow = viewRow;
+        repaintActionsCell(previous);
+        repaintActionsCell(viewRow);
+    }
+
+    private void repaintActionsCell(int viewRow) {
+        if (viewRow < 0 || viewRow >= table.getRowCount()) {
+            return;
+        }
+        int column = table.convertColumnIndexToView(actionsColumn());
+        if (column >= 0) {
+            table.repaint(table.getCellRect(viewRow, column, true));
+        }
+    }
+
+    /**
+     * Keeps an existing multi-selection when the menu is opened from inside it, and otherwise
+     * moves the selection to the clicked row, so the menu always acts on what is highlighted.
+     */
+    private void selectIfUnselected(int viewRow) {
+        if (!table.isRowSelected(viewRow)) {
+            table.setRowSelectionInterval(viewRow, viewRow);
+        }
+    }
+
+    /** The selected rows, in table order; empty when nothing is selected. */
+    private @NotNull List<Row> selectedRows() {
+        List<Row> selected = new ArrayList<>();
+        for (int viewRow : table.getSelectedRows()) {
+            int modelRow = table.convertRowIndexToModel(viewRow);
+            if (modelRow >= 0 && modelRow < visibleRows.size()) {
+                selected.add(visibleRows.get(modelRow));
+            }
+        }
+        return selected;
+    }
+
+    /**
+     * Every action for the selected dependencies: the full set for a single row, and for a
+     * multi-selection only the ones that are meaningful in bulk - a custom version or the
+     * details of "all of them at once" is not.
+     */
+    private void showRowActionsMenu(int x, int y) {
+        javax.swing.JPopupMenu menu = buildRowActionsMenu();
+        if (menu != null) {
+            showMenu(menu, x, y);
+        }
+    }
+
+    /** @return the menu for the current selection, or null when nothing usable is selected. */
+    @Nullable javax.swing.JPopupMenu buildRowActionsMenu() {
+        int[] viewRows = table.getSelectedRows();
+        if (viewRows.length == 0) {
+            return null;
+        }
+        if (viewRows.length == 1) {
+            int modelRow = table.convertRowIndexToModel(viewRows[0]);
+            if (modelRow < 0 || modelRow >= visibleRows.size()) {
+                return null;
+            }
+            return singleRowMenu(modelRow);
+        }
+        List<Row> selected = selectedRows();
+        return selected.size() < 2 ? null : multiRowMenu(selected);
+    }
+
+    /** Overridden in tests, where a popup cannot be put on screen. */
+    void showMenu(@NotNull javax.swing.JPopupMenu menu, int x, int y) {
+        menu.show(table, x, y);
+    }
+
+    /** The table itself, for tests that drive real mouse events through it. */
+    @NotNull JBTable tableForTesting() {
+        return table;
+    }
+
+    private @NotNull javax.swing.JPopupMenu singleRowMenu(int modelRow) {
+        Row row = visibleRows.get(modelRow);
+        javax.swing.JPopupMenu menu = new javax.swing.JPopupMenu();
+        menu.add(item("Details...", () -> showDetails(modelRow)));
+        menu.addSeparator();
+        menu.add(item("Update to newest version", () -> updateRowToNewest(row)));
+        menu.add(item("Show all available versions...", () -> chooseVersionOfRow(row)));
+        menu.add(item("Custom version...", () -> changeVersionOfRow(row)));
+        menu.addSeparator();
+        boolean on = pomFile != null
+                && AutoUpdateService.getInstance(project).isAutoUpdate(pomFile, row.dependency.getKey());
+        javax.swing.JCheckBoxMenuItem autoItem = new javax.swing.JCheckBoxMenuItem("Auto update", on);
+        autoItem.addActionListener(e -> toggleAutoUpdate(modelRow));
+        menu.add(autoItem);
+        menu.addSeparator();
+        menu.add(item("Delete from pom...", () -> confirmAndDelete(modelRow)));
+        return menu;
+    }
+
+    private @NotNull javax.swing.JPopupMenu multiRowMenu(@NotNull List<Row> selected) {
+        int count = selected.size();
+        List<Dependency> dependencies = selected.stream().map(row -> row.dependency).toList();
+        javax.swing.JPopupMenu menu = new javax.swing.JPopupMenu();
+        javax.swing.JMenuItem header = new javax.swing.JMenuItem(count + " dependencies selected");
+        header.setEnabled(false);
+        menu.add(header);
+        menu.addSeparator();
+        menu.add(item("Update " + count + " dependencies to the newest version",
+                () -> updateRowsToNewest(List.copyOf(selected), "selected dependencies")));
+        menu.addSeparator();
+        menu.add(item("Turn auto update on for " + count + " dependencies",
+                () -> setAutoUpdateForAll(dependencies, true)));
+        menu.add(item("Turn auto update off for " + count + " dependencies",
+                () -> setAutoUpdateForAll(dependencies, false)));
+        menu.addSeparator();
+        menu.add(item("Delete " + count + " dependencies from pom...", () -> {
+            DependencyActions actions = actions();
+            if (actions != null && actions.confirmDelete(dependencies)) {
+                actions.runDelete(dependencies);
+            }
+        }));
+        return menu;
+    }
+
+    private static @NotNull javax.swing.JMenuItem item(@NotNull String text, @NotNull Runnable action) {
+        javax.swing.JMenuItem menuItem = new javax.swing.JMenuItem(text);
+        menuItem.addActionListener(e -> action.run());
+        return menuItem;
+    }
+
+    /** Flips auto update for a whole selection, asking once instead of per dependency. */
+    private void setAutoUpdateForAll(@NotNull List<Dependency> dependencies, boolean enable) {
+        DependencyActions actions = actions();
+        if (actions != null && actions.setAutoUpdateForAll(dependencies, enable)) {
+            // Re-filter: with "Only auto update" active, rows turned off disappear immediately.
+            applyRowFilter();
         }
     }
 
@@ -662,134 +786,29 @@ public class DependencyTablePanel extends JPanel {
 
     /** Writes the given version for the dependency into the pom, refreshes and builds. */
     private void applyVersion(@NotNull Dependency dep, @NotNull String newVersion) {
-        File pom = pomFile;
-        if (pom == null) {
-            return;
+        DependencyActions actions = actions();
+        if (actions != null) {
+            actions.applyVersion(dep, newVersion);
         }
-        new Task.Backgroundable(project, "Maven Assist: Updating " + dep.getKey(), true) {
-            @Override
-            public void run(@NotNull ProgressIndicator indicator) {
-                if (newVersion.equals(dep.getVersion())) {
-                    Notifier.info(project, dep.getKey() + " is already at version " + newVersion + ".");
-                    return;
-                }
-                try {
-                    if (!writeVersion(pom, dep, newVersion, null)) {
-                        return;
-                    }
-                } catch (IOException e) {
-                    Notifier.error(project, "Failed to update " + dep.getKey() + ": " + e.getMessage());
-                    return;
-                }
-                Notifier.info(project, "Updated " + dep.getKey() + " from "
-                        + (dep.getVersion().isEmpty() ? "(managed)" : dep.getVersion())
-                        + " to " + newVersion + ". Building...");
-                ApplicationManager.getApplication().invokeLater(() -> {
-                    LocalFileSystem.getInstance().refreshAndFindFileByIoFile(pom);
-                    reload();
-                });
-                MavenBuildRunner.build(project, pom.getParentFile(), null);
-            }
-        }.queue();
-    }
-
-    /**
-     * Writes the new version of one dependency. When the version comes from a property that a
-     * parent pom declares, the user decides first whether to bump it there, which moves every
-     * module inheriting it, or to write the version into this pom only. Returns false when they
-     * cancelled. {@code runChoice} carries that answer across a bulk update so it is asked once.
-     */
-    private boolean writeVersion(@NotNull File pom,
-                                 @NotNull Dependency dep,
-                                 @NotNull String newVersion,
-                                 @Nullable AtomicReference<ParentPropertyChoice.Choice> runChoice)
-            throws IOException {
-        PomUtils.VersionProperty property = PomUtils.findVersionProperty(pom, dep);
-        if (property != null && !property.declaringPom().equals(pom)) {
-            ParentPropertyChoice.Choice choice = runChoice == null ? null : runChoice.get();
-            if (choice == null) {
-                choice = ParentPropertyChoice.ask(project, parentPropertyQuestion(
-                        dep, property, newVersion, runChoice != null));
-                if (runChoice != null) {
-                    runChoice.set(choice);
-                }
-            }
-            if (choice == ParentPropertyChoice.Choice.CANCEL) {
-                return false;
-            }
-            if (choice == ParentPropertyChoice.Choice.PARENT) {
-                File declaring = property.declaringPom();
-                PomWriteAction.run(project, declaring, "Update Maven version property",
-                        () -> PomUtils.setProperty(declaring, property.name(), newVersion));
-                return true;
-            }
-        }
-        PomWriteAction.run(project, pom, "Update Maven dependency",
-                () -> PomUtils.setDependencyVersion(pom, dep, newVersion));
-        return true;
-    }
-
-    private static @NotNull String parentPropertyQuestion(@NotNull Dependency dep,
-                                                          @NotNull PomUtils.VersionProperty property,
-                                                          @NotNull String newVersion,
-                                                          boolean appliesToWholeRun) {
-        return dep.getKey() + " takes its version from the property " + property.name()
-                + ", which is declared in\n" + property.declaringPom().getAbsolutePath()
-                + "\n\nUpdate the property there, moving every module that inherits it to "
-                + newVersion + ", or write " + newVersion + " into this pom.xml only?"
-                + (appliesToWholeRun
-                   ? "\n\nThis answer is used for the rest of the dependencies in this update."
-                   : "");
     }
 
     /** The red trash button: asks for confirmation, then removes the dependency from the pom. */
     private void confirmAndDelete(int rowIndex) {
-        if (rowIndex < 0 || rowIndex >= visibleRows.size() || pomFile == null) {
-            return;
+        DependencyActions actions = actions();
+        if (actions != null && rowIndex >= 0 && rowIndex < visibleRows.size()) {
+            actions.confirmAndDelete(visibleRows.get(rowIndex).dependency);
         }
-        Dependency dep = visibleRows.get(rowIndex).dependency;
-        int answer = com.intellij.openapi.ui.Messages.showYesNoDialog(project,
-                "Delete " + dep.getKey() + " from pom.xml?\nThe whole <dependency> entry will be removed.",
-                "Delete Dependency", "Delete", "Cancel",
-                com.intellij.openapi.ui.Messages.getWarningIcon());
-        if (answer != com.intellij.openapi.ui.Messages.YES) {
-            return;
-        }
-        File pom = pomFile;
-        new Task.Backgroundable(project, "Maven Assist: Deleting " + dep.getKey(), true) {
-            @Override
-            public void run(@NotNull ProgressIndicator indicator) {
-                try {
-                    PomWriteAction.run(project, pom, "Delete Maven dependency",
-                            () -> PomUtils.removeDependency(pom, dep));
-                } catch (IOException e) {
-                    Notifier.error(project, "Failed to delete " + dep.getKey() + ": " + e.getMessage());
-                    return;
-                }
-                AutoUpdateService.getInstance(project).setAutoUpdate(pom, dep.getKey(), false);
-                Notifier.info(project, "Deleted " + dep.getKey() + " from pom.xml. Building...");
-                ApplicationManager.getApplication().invokeLater(() -> {
-                    LocalFileSystem.getInstance().refreshAndFindFileByIoFile(pom);
-                    reload();
-                });
-                MavenBuildRunner.build(project, pom.getParentFile(), null);
-            }
-        }.queue();
     }
 
     private void toggleAutoUpdate(int rowIndex) {
-        if (rowIndex < 0 || rowIndex >= visibleRows.size() || pomFile == null) {
+        DependencyActions actions = actions();
+        if (actions == null || rowIndex < 0 || rowIndex >= visibleRows.size()) {
             return;
         }
-        Dependency dep = visibleRows.get(rowIndex).dependency;
-        AutoUpdateService service = AutoUpdateService.getInstance(project);
-        boolean enable = !service.isAutoUpdate(pomFile, dep.getKey());
-        if (!AutoUpdateConfirmation.confirm(project, dep, enable)) {
-            return;
+        if (actions.toggleAutoUpdate(visibleRows.get(rowIndex).dependency)) {
+            // Re-filter: with "Only auto update" active, a turned-off row disappears immediately.
+            applyRowFilter();
         }
-        service.setAutoUpdate(pomFile, dep.getKey(), enable);
-        // Re-filter: with "Only auto update" active, a turned-off row disappears immediately.
-        applyRowFilter();
     }
 
     /**
@@ -891,63 +910,29 @@ public class DependencyTablePanel extends JPanel {
                     .toList();
         }
 
-        String scope = allDependencies ? "all dependencies" : "selected dependencies";
-        new Task.Backgroundable(project, "Maven Assist: Updating " + scope, true) {
-            @Override
-            public void run(@NotNull ProgressIndicator indicator) {
-                int updated = 0;
-                List<String> failures = new ArrayList<>();
-                List<String> unavailable = new ArrayList<>();
-                AtomicReference<ParentPropertyChoice.Choice> runChoice = new AtomicReference<>();
-                for (Row row : snapshot) {
-                    indicator.checkCanceled();
-                    Dependency dep = row.dependency;
-                    indicator.setText("Checking " + dep.getKey() + "...");
-                    String latest = row.latest.isEmpty() || "?".equals(row.latest)
-                            ? MavenCentralClient.getLatestVersion(dep.getGroupId(), dep.getArtifactId())
-                            : row.latest;
-                    if (latest == null) {
-                        unavailable.add(dep.getKey());
-                        continue;
-                    }
-                    if (!VersionPolicy.isUpgrade(dep.getVersion(), latest)) {
-                        continue;
-                    }
-                    try {
-                        indicator.setText("Updating " + dep.getKey() + " to " + latest + "...");
-                        if (writeVersion(pom, dep, latest, runChoice)) {
-                            updated++;
-                        } else {
-                            break; // cancelled: the answer holds for the rest of this update
-                        }
-                    } catch (IOException e) {
-                        failures.add(dep.getKey() + ": " + e.getMessage());
-                    }
-                }
-                if (!failures.isEmpty()) {
-                    Notifier.error(project, "Could not update:\n" + String.join("\n", failures));
-                }
-                if (!unavailable.isEmpty()) {
-                    Notifier.warn(project, "Could not determine the newest version for:\n"
-                            + String.join("\n", unavailable)
-                            + "\nThese dependencies were not changed.");
-                }
-                if (updated == 0) {
-                    if (failures.isEmpty() && unavailable.isEmpty()) {
-                        Notifier.info(project, "All dependencies are already up to date. ✔");
-                    }
-                    return;
-                }
-                Notifier.info(project, "Updated " + updated
-                        + (allDependencies ? " dependencies" : " selected dependencies")
-                        + " to the newest version. Building...");
-                ApplicationManager.getApplication().invokeLater(() -> {
-                    LocalFileSystem.getInstance().refreshAndFindFileByIoFile(pom);
-                    reload();
-                });
-                MavenBuildRunner.build(project, pom.getParentFile(), null);
+        updateRowsToNewest(snapshot, allDependencies ? "dependencies" : "selected dependencies");
+    }
+
+    /**
+     * Bumps the given rows to their newest stable version in one background pass: one progress
+     * bar, one answer to the parent-property question, one summary notification and one build.
+     *
+     * @param scope how the selection is named in the progress bar and the summary
+     */
+    private void updateRowsToNewest(@NotNull List<Row> snapshot, @NotNull String scope) {
+        DependencyActions actions = actions();
+        if (actions == null) {
+            return;
+        }
+        List<Dependency> dependencies = new ArrayList<>();
+        Map<String, String> cachedLatest = new HashMap<>();
+        for (Row row : snapshot) {
+            dependencies.add(row.dependency);
+            if (!row.latest.isEmpty()) {
+                cachedLatest.put(row.dependency.getKey(), row.latest);
             }
-        }.queue();
+        }
+        actions.updateAllToNewest(dependencies, cachedLatest, scope);
     }
 
     /** Lets the user pick a parent pom.xml via path and sets/replaces the &lt;parent&gt; block. */
@@ -1122,7 +1107,7 @@ public class DependencyTablePanel extends JPanel {
 
         @Override
         public int getColumnCount() {
-            return tableFields.size() + 3 + colOffset();
+            return tableFields.size() + 4 + colOffset();
         }
 
         @Override
@@ -1164,7 +1149,7 @@ public class DependencyTablePanel extends JPanel {
             if (columnIndex == updateColumn()) {
                 return "Update";
             }
-            if (columnIndex == deleteColumn()) {
+            if (columnIndex == deleteColumn() || columnIndex == actionsColumn()) {
                 return "";
             }
             int fieldIndex = fieldIndexOf(columnIndex);
