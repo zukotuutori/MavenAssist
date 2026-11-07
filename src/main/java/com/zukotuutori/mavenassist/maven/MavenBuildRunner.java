@@ -406,6 +406,29 @@ public final class MavenBuildRunner {
         return null;
     }
 
+    /**
+     * Finds an executable by name in the directories listed in PATH.
+     * {@code PathEnvironmentVariableUtil.findInPath} does the same, but is scheduled for removal,
+     * and its replacement only exists in IDEs much newer than the minimum this plugin supports.
+     */
+    private static @Nullable File findOnPath(@NotNull String fileName) {
+        String path = PathEnvironmentVariableUtil.getPathVariableValue();
+        if (path == null) {
+            return null;
+        }
+        for (String dirPath : PathEnvironmentVariableUtil.getPathDirs(path)) {
+            File dir = new File(dirPath);
+            if (!dir.isAbsolute()) {
+                continue;
+            }
+            File file = new File(dir, fileName);
+            if (file.isFile() && file.canExecute()) {
+                return file;
+            }
+        }
+        return null;
+    }
+
     /** The package-manager command that installs Maven on this platform, or null if none is available. */
     private static String @Nullable [] installCommand() {
         if (SystemInfo.isMac) {
@@ -414,11 +437,11 @@ public final class MavenBuildRunner {
                     return new String[]{brew, "install", "maven"};
                 }
             }
-            File onPath = PathEnvironmentVariableUtil.findInPath("brew");
+            File onPath = findOnPath("brew");
             return onPath == null ? null : new String[]{onPath.getAbsolutePath(), "install", "maven"};
         }
         if (SystemInfo.isWindows) {
-            File winget = PathEnvironmentVariableUtil.findInPath("winget.exe");
+            File winget = findOnPath("winget.exe");
             return winget == null ? null : new String[]{winget.getAbsolutePath(), "install", "-e",
                     "--id", "Apache.Maven", "--accept-source-agreements", "--accept-package-agreements"};
         }
@@ -432,7 +455,7 @@ public final class MavenBuildRunner {
             return wrapper.getAbsolutePath();
         }
         String executableName = SystemInfo.isWindows ? "mvn.cmd" : "mvn";
-        File onPath = PathEnvironmentVariableUtil.findInPath(executableName);
+        File onPath = findOnPath(executableName);
         if (onPath != null) {
             return onPath.getAbsolutePath();
         }

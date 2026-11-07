@@ -4,7 +4,11 @@
     <vendor url="https://github.com/zukotuutori/MavenAssist">zukotuutori</vendor>
 
     <change-notes><![CDATA[
-        <h3>Maven Assist 2.1.1: What's New Since Version 2.0.0?</h3>
+        <h3>Maven Assist 2.1.2: What's New Since Version 2.0.0?</h3>
+        <p>Maven Assist no longer calls an IntelliJ API that JetBrains has scheduled for removal.
+            Looking up <code>mvn</code>, <code>brew</code> and <code>winget</code> on your PATH now uses the
+            plugin's own lookup, so the plugin keeps working in future IDE releases. Nothing changes in how
+            it behaves.</p>
         <p>Picking a version is no longer a guessing game. Next to <b>Newest version</b> and
             <b>Custom version...</b> there is now <b>Show all available versions...</b>, which lists every
             version Maven Central publishes for that artifact, newest first. A filter field narrows long
