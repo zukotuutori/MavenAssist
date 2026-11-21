@@ -2,7 +2,7 @@ import org.jetbrains.intellij.platform.gradle.TestFrameworkType
 
 plugins {
     id("java")
-    id("org.jetbrains.intellij.platform") version "2.19.0"
+    id("org.jetbrains.intellij.platform") version "2.20.1"
 }
 
 group = "com.zukotuutori"
@@ -27,7 +27,7 @@ dependencies {
         // Resolve the IntelliJ Platform SDK from the marketplace so anyone can build.
         // To build against a locally installed IDE instead, replace with:
         //   local("/Applications/IntelliJ IDEA.app")
-        create("IC", "2025.1")
+        intellijIdea("2026.3")
         testFramework(TestFrameworkType.Platform)
     }
 }
@@ -44,7 +44,7 @@ intellijPlatform {
 
     pluginConfiguration {
         ideaVersion {
-            sinceBuild = "251"
+            sinceBuild = "263"
             untilBuild = provider { null }
         }
     }
@@ -52,7 +52,7 @@ intellijPlatform {
 
 java {
     toolchain {
-        languageVersion = JavaLanguageVersion.of(21)
+        languageVersion = JavaLanguageVersion.of(25)
     }
 }
 
